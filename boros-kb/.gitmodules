@@ -1,0 +1,3 @@
+[submodule "dev-docs"]
+	path = dev-docs
+	url = git@github.com:pendle-finance/documentation.git

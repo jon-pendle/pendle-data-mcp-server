@@ -1,0 +1,27 @@
+# MCP server framework
+mcp==1.26.0
+
+# Data tools dependencies
+pandas==2.1.4
+pandas-gbq==0.19.2
+google-auth==2.40.2
+google-api-python-client==2.142.0
+google-cloud-aiplatform==1.95.1
+
+# HTTP requests (for DeFiLlama tools)
+requests==2.31.0
+
+# Google Sheets access (for pool meta + API key store)
+google-auth[aiohttp]==2.40.2
+
+# BigQuery streaming insert (for usage tracking + learning reports)
+google-cloud-bigquery==3.15.0
+
+# OAuth token/client storage in Firestore
+google-cloud-firestore==2.25.0
+
+# Async HTTP client (for Google OAuth token exchange)
+httpx==0.28.1
+
+# Async HTTP client (for QA service calls)
+aiohttp>=3.9.0

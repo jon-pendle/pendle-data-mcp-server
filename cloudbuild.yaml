@@ -1,0 +1,15 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/cloud-run/pendle-mcp-server:$SHORT_SHA'
+      - '-f'
+      - 'Dockerfile'
+      - '.'
+
+images:
+  - 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/cloud-run/pendle-mcp-server:$SHORT_SHA'
+
+options:
+  dynamic_substitutions: true

@@ -1,0 +1,51 @@
+# On-chain parameters
+margin_type = "Cross"
+maturity = "Mar 27 2026 00:00 UTC"
+
+[Margin]
+kIM = 1/2.1
+kMM = 1/3
+I_threshold = 0.08
+t_threshold = "7 days"
+
+[OrderBounds]
+k_MD = 0.15
+k_CO = 0.1
+limit_Order_Upper_Const = 0.004
+limit_Order_Upper_Slope = 1.05 
+limit_Order_Lower_Const = -0.004
+limit_Order_Lower_Slope = 0.95 
+
+[MitigatingMeasure]
+# Initial, 1-sided, in USD
+hard_OI_cap = 20_000_000
+
+[Oracle]
+max_FR_deviation_factor = 50
+mark_rate_twap_duration = "5 min"
+
+[AMM]
+fee_rate = 0%
+initial_supply_cap_usd = $15k
+oracle_twap_duration = "1 min"
+min_rate = 0.07
+max_rate = 0.5
+initial_rate = 0.09
+initial_size = 16.91587387
+flip_liquidity = 20.48566837
+initial_cash = 2.11048569
+
+## Off-chain parameters
+
+[AutomaticResponses]
+new_liquidation_incentive_base = 0.5 
+new_liquidation_incentive_slope = 0 
+new_k_MD = 0.1
+new_k_CO = 0.06
+new_limit_Order_Upper_Const = 0.002
+new_limit_Order_Upper_Slope = 1.025
+new_limit_Order_Lower_Const = -0.002
+new_limit_Order_Lower_Slope = 0.975
+
+[MaturityAdjustment]
+near_maturity_k_MD=0.5

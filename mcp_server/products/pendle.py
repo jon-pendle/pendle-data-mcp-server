@@ -1,0 +1,783 @@
+"""
+Pendle Protocol product specification.
+
+Contains:
+- Table definitions with per-table catalogs
+- Product-level context (business rules shared across tables)
+- Extra tools (pool discovery)
+"""
+
+from . import ProductSpec, TableSpec
+
+
+# ── Product-level context (returned with index) ──────────────────────
+
+_CONTEXT = """\
+# Pendle Data Catalog
+
+## Business Context
+
+Pendle Protocol: decentralized yield trading. Boros Protocol: Pendle's margin yield trading.
+$PENDLE: governance/utility token. Pool = Market (interchangeable).
+IY = Implied Yield (market consensus on future yield, from token amounts not USD). Fixed APY = Implied APY.
+Data is daily granularity. "latest" / "current" = yesterday's complete data (today is incomplete).
+Token names are exclusive: one character difference = different token (e.g. "USD0" ≠ "USD0++").
+
+pool_id format: CONCAT(pool, '_', chain) for pool_metrics / pool_metrics_lifetime,
+                CONCAT(pool, '_', chain_id) for market_meta.
+
+## Pool Discovery
+
+Users often give informal pool names (e.g. "Susde May", "Reusd Jun").
+Do NOT use SQL LIKE patterns to guess pool names. Instead:
+1. Call get_pendle_pools_tool() — returns all pools with pool_id (format: poolName_chainId),
+   expiry_date, expiry_month, yield_source, base_asset, underlying_issuer.
+2. Fuzzy-match user input against pool_id + expiry month in context.
+3. Use matched pool_ids as exact values in run_sql WHERE clauses.
+
+## Analysis Rules
+
+- "latest" / "current" = CURRENT_DATE() - 1 (yesterday's complete data).
+- For comparisons, always fetch BOTH periods (DoD: 2 days, WoW: 2 weeks, MoM: 2 months).
+- Use specific dates (WHERE dt >= '...' AND dt <= '...'), not relative intervals for comparisons.
+- Maturity: pool matures at 00:00 UTC on expiry_date. TVL at maturity = data from expiry_date - 1.
+- Near maturity: IY may spike (short duration, user rotation).
+- Format: $1.2M, $3.4B. Rates as percentages (5.2%). IY changes in percentage points ("IY +0.25pp").
+- Pendle Revenue = explicit swap fees + implicit swap fees + yield fees.
+- DeFiLlama: use separate tools (get_defillama_*). Never guess slugs — look up first.
+
+## Cannot Be Answered
+- Per-protocol collateral breakdown (Aave vs Euler vs Morpho) → Recommend dashboard.
+- Real-time / intraday data → daily granularity only.
+- Individual wallet / user positions → not available.
+- Non-Pendle protocol internals → only DeFiLlama TVL available.
+"""
+
+
+# ── Per-table catalogs ───────────────────────────────────────────────
+
+_POOL_METRICS_DAILY = """\
+## `pendle-data.analytics.pool_metrics_all_in_one_daily`
+
+Primary fact table. One row per pool per day. **Partition: dt (DATE) — always filter on dt.**
+Join to market_meta: `pm.pool = mm.pool AND pm.chain = mm.chain_id`
+
+### Aggregation Rules
+
+Columns have two aggregation contexts:
+1. **Across pools** (same day): always SUM (except holder counts → see below)
+2. **Across days** (same group): depends on metric type:
+   - **stock** (point-in-time snapshot like TVL): use **AVG**
+   - **flow** (cumulative like volume/fees): use **SUM**
+   - **rate** (yield/APY): use **TVL-weighted average** (see pattern below)
+   - **holder count**: use **AVG** within a group; **NOT additive across pools**
+
+When using DATE_TRUNC for weekly/monthly aggregation, use a two-layer CTE:
+- Inner layer: GROUP BY dt + dimensions → daily per-group totals
+- Outer layer: DATE_TRUNC + correct per-column aggregation (AVG/SUM/weighted)
+
+### Columns
+
+#### Dimensions (use in GROUP BY / WHERE via JOIN to market_meta)
+| Column | Table | Description |
+|--------|-------|-------------|
+| dt | pm | Date (partition key) |
+| pool | pm | Pool name |
+| chain | pm | Chain numeric ID |
+| market_meta.chain | mm | Chain name (ethereum, arbitrum, ...) |
+| market_meta.yield_source | mm | Yield category (e.g. "3-Lending") |
+| market_meta.base_asset | mm | Asset type (ETH, Stable, BTC) |
+| market_meta.underlying_issuer | mm | Protocol providing yield (Aave, Lido, Ethena, ...) |
+| market_meta.expiry_date | mm | Pool maturity date |
+
+#### TVL — stock metrics (cross-day: AVG)
+| Column | Description | Unit |
+|--------|-------------|------|
+| overall_tvl | Total Value Locked (AMM + floating PT + floating YT) | USD |
+| amm_tvl | AMM liquidity pool TVL | USD |
+| total_pt_in_usd | All PT tokens (in LP + floating) | USD |
+| floating_pt_in_usd | PT tokens NOT in LP | USD |
+| floating_yt_in_usd | All YT tokens (YT is never in LP) | USD |
+| pt_tvl_in_collateral | PT as lending collateral (all protocols combined) | USD |
+| lp_tvl_in_collateral | LP as lending collateral (all protocols combined) | USD |
+
+Derived: pt_in_lp = total_pt_in_usd - floating_pt_in_usd; sy_in_lp = amm_tvl - pt_in_lp.
+⚠️ Collateral columns here are aggregated across ALL lending protocols. For per-protocol breakdown, use `pt_collateral_daily_balance` table instead.
+
+#### Volume — flow metrics (cross-day: SUM)
+| Column | Description | Unit |
+|--------|-------------|------|
+| notional_trading_volume | Total volume (limit + AMM) | USD |
+| notional_trading_volume_limit | Limit order volume | USD |
+| notional_trading_volume_amm | AMM volume | USD |
+
+#### Swap Fees — flow metrics (cross-day: SUM)
+| Column | Description | Unit |
+|--------|-------------|------|
+| total_swap_fee_usd | Explicit swap fees (AMM + limit) | USD |
+| total_limit_swap_fee_usd | Limit order explicit fees | USD |
+| total_implicit_swap_fee_usd | AMM implicit fees | USD |
+
+Total Swap Fees = total_swap_fee_usd + total_implicit_swap_fee_usd.
+Pendle Revenue = swap fees + yield fees.
+
+#### Yield Fees — flow metrics (cross-day: SUM)
+| Column | Description | Unit |
+|--------|-------------|------|
+| expected_yield_fee | Theoretical pre-maturity yield fee | USD |
+| expected_expire_fee | Theoretical post-maturity yield fee | USD |
+| avg_daily_realized_yield_fee_in_usd | Actually claimed fees, epoch-averaged | USD |
+
+⚠️ CRITICAL RULES:
+- Combine expected_yield_fee + expected_expire_fee as "total expected yield fees".
+- NEVER sum expected + realized — fundamentally different methodologies.
+- NEVER multiply avg_daily_realized_yield_fee_in_usd by days — it is epoch-based.
+
+#### Yield Rates — rate metrics (cross-day: TVL-weighted average)
+| Column | Description | Unit |
+|--------|-------------|------|
+| latest_tv_weighted_implied_yield | TVL-weighted implied yield | rate (0.05 = 5%) |
+| lp_base_apy | LP base APY | rate (0.05 = 5%) |
+
+Aggregation pattern for rates:
+```sql
+-- Inner CTE
+SUM(latest_tv_weighted_implied_yield * overall_tvl) AS iy_num,
+SUM(overall_tvl) AS iy_den
+-- Outer query
+SUM(iy_num) / NULLIF(SUM(iy_den), 0) AS implied_yield
+```
+lp_base_apy uses amm_tvl as weight instead of overall_tvl.
+
+#### Underlying TVL — stock metrics (cross-day: AVG)
+| Column | Description | Unit |
+|--------|-------------|------|
+| underlying_supply | Underlying token supply per pool | tokens |
+| underlying_tvl | Underlying token TVL | USD |
+
+⚠️ NOT additive across pools — multiple pools can share the same underlying asset. Use MAX or deduplicate by underlying asset when aggregating across pools.
+
+#### Emissions — flow metrics (cross-day: SUM)
+| Column | Description | Unit |
+|--------|-------------|------|
+| pendle_emission_amount | PENDLE emissions (sPENDLE era, 2026-01-29+) | tokens |
+| pendle_emission_value | PENDLE emissions value (sPENDLE era, 2026-01-29+) | USD |
+| pendle_emission_amount_legacy | PENDLE emissions (vePENDLE era, before 2026-01-29) | tokens |
+| pendle_emission_value_legacy | PENDLE emissions value (vePENDLE era, before 2026-01-29) | USD |
+
+⚠️ Method changed 2026-01-29 (vePENDLE → sPENDLE). Use `pendle_emission_*_legacy` for pre-2026-01-29 and `pendle_emission_amount/value` for post. Do not mix. Prefer USD value.
+
+#### AIM Emission Breakdown — flow metrics (cross-day: SUM)
+| Column | Description | Unit |
+|--------|-------------|------|
+| aim_daily_fee | AIM emission: fee component | USD |
+| aim_daily_tvl | AIM emission: TVL component | USD |
+| aim_daily_discretionary | AIM emission: discretionary component | USD |
+
+⚠️ Available from 2026-01-29+ (sPENDLE era only). Expected: aim_daily_fee + aim_daily_tvl + aim_daily_discretionary ≈ pendle_emission_value.
+
+#### Campaign Incentives — flow metrics (cross-day: SUM)
+| Column | Description | Unit |
+|--------|-------------|------|
+| campaign_incentive | Total campaign incentives | USD |
+| co_bribe_campaign_incentive | Co-bribe portion | USD |
+| lp_holder_campaign_incentive | LP holder portion | USD |
+| yt_holder_campaign_incentive | YT holder portion | USD |
+| lp_yt_holder_campaign_incentive | LP+YT holder portion | USD |
+| external_incentives | Non-co-bribe campaign incentive total | USD |
+| external_incentives_to_lp_holders | External incentives to LP holders | USD |
+| external_incentives_to_yt_holders | External incentives to YT holders | USD |
+| external_incentives_to_lp_yt_holders | External incentives to LP+YT holders | USD |
+
+#### Holder Counts — stock metrics (cross-day: AVG)
+| Column | Description | Unit |
+|--------|-------------|------|
+| pt_holder_count | PT holder addresses (end-of-day snapshot) | count |
+| yt_holder_count | YT holder addresses | count |
+| lp_holder_count | LP holder addresses | count |
+| pt_and_yt_holder_count | Addresses holding BOTH PT and YT | count |
+
+⚠️ NOT additive across pools — same address appears in multiple pools.
+Use AVG or MAX when aggregating across pools, never SUM.
+
+### SQL Examples
+
+#### Protocol-level daily metrics
+```sql
+SELECT dt,
+  SUM(overall_tvl) AS tvl,
+  SUM(notional_trading_volume) AS volume,
+  SUM(total_swap_fee_usd) + SUM(total_implicit_swap_fee_usd) AS total_swap_fees,
+  SUM(expected_yield_fee) AS yield_fee
+FROM `pendle-data.analytics.pool_metrics_all_in_one_daily`
+WHERE dt >= '2026-03-01' AND dt <= '2026-03-16'
+GROUP BY dt ORDER BY dt
+```
+
+#### Pool-level weekly metrics with two-layer CTE
+```sql
+WITH daily AS (
+  SELECT pm.dt,
+    CONCAT(pm.pool, '_', pm.chain) AS pool_id,
+    SUM(pm.overall_tvl) AS tvl,
+    SUM(pm.notional_trading_volume) AS volume,
+    SUM(pm.expected_yield_fee) AS yield_fee,
+    SUM(pm.latest_tv_weighted_implied_yield * pm.overall_tvl) AS iy_num,
+    SUM(pm.overall_tvl) AS iy_den
+  FROM `pendle-data.analytics.pool_metrics_all_in_one_daily` pm
+  WHERE pm.dt >= '2026-03-01' AND pm.dt <= '2026-03-16'
+  GROUP BY pm.dt, pool_id
+)
+SELECT DATE_TRUNC(dt, WEEK) AS week, pool_id,
+  AVG(tvl) AS avg_tvl,                -- stock → AVG
+  SUM(volume) AS total_volume,         -- flow → SUM
+  SUM(yield_fee) AS total_yield_fee,   -- flow → SUM
+  SUM(iy_num) / NULLIF(SUM(iy_den), 0) AS weighted_iy  -- rate → weighted
+FROM daily GROUP BY 1, 2 ORDER BY week, avg_tvl DESC
+```
+
+#### Filter by base_asset via JOIN
+```sql
+SELECT pm.dt, SUM(pm.overall_tvl) AS eth_tvl
+FROM `pendle-data.analytics.pool_metrics_all_in_one_daily` pm
+JOIN `pendle-data.analytics.market_meta` mm
+  ON pm.pool = mm.pool AND pm.chain = mm.chain_id
+WHERE pm.dt >= '2026-03-10' AND pm.dt <= '2026-03-16'
+  AND mm.base_asset = 'ETH'
+GROUP BY pm.dt ORDER BY pm.dt
+```
+
+#### Top 5 pools by yield fee
+```sql
+SELECT CONCAT(pm.pool, '_', pm.chain) AS pool_id,
+  SUM(pm.expected_yield_fee) AS yield_fee, AVG(pm.overall_tvl) AS avg_tvl
+FROM `pendle-data.analytics.pool_metrics_all_in_one_daily` pm
+WHERE pm.dt >= '2026-03-10' AND pm.dt <= '2026-03-16'
+GROUP BY pool_id ORDER BY yield_fee DESC LIMIT 5
+```
+"""
+
+_MARKET_META = """\
+## `pendle-data.analytics.market_meta`
+
+Pool metadata / reference data. One row per pool. No partition key.
+Join key to pool_metrics: `pool` + `chain_id` (= pool_metrics.chain).
+
+| Column | Type | Description |
+|--------|------|-------------|
+| pool | STRING | Pool name (join key) |
+| chain_id | INT64 | Chain numeric ID (join key) |
+| chain | STRING | Chain name (ethereum, arbitrum, ...) |
+| market_id | STRING | chain_id + market address (e.g. "8453-0x6144...") |
+| expiry_date | DATE | Market maturity date (at 00:00 UTC) |
+| yield_source | STRING | Yield category (e.g. "3-Lending") |
+| base_asset | STRING | Asset type (ETH, Stable, BTC) |
+| underlying_issuer | STRING | Protocol providing yield (Aave, Lido, ...) |
+| fee_tier | FLOAT64 | Swap fee rate (e.g. 0.0002) |
+| yield_range_min | FLOAT64 | Liquidity range lower bound |
+| yield_range_max | FLOAT64 | Liquidity range upper bound |
+| first_log_dt | STRING | Pool start date (may contain timestamp; cast with SAFE_CAST(TRIM(first_log_dt) AS DATE)) |
+| protocol_name | STRING | For DeFiLlama cross-reference |
+| community_flag | STRING | "Pendle Team" or permissionless |
+| underlying_name | STRING | Underlying asset name |
+| accounting_asset_name | STRING | Accounting asset name |
+| py_unit_name | STRING | What 1 PT redeems to at maturity |
+| penco_meta | ARRAY<STRUCT> | Pencosystem metadata |
+| initiated_by | STRING | Market initiator |
+| asset_desc | STRING | Asset description |
+
+Use for pool discovery: find pool IDs, filter by chain/expiry/yield_source.
+For penco_meta: `ARRAY_TO_STRING(ARRAY(SELECT CONCAT(info.protocol,'_',info.category) FROM UNNEST(penco_meta) AS info), ',')`
+
+### SQL Example
+```sql
+SELECT CONCAT(pool, '_', chain_id) AS pool_id,
+  expiry_date, yield_source, base_asset, underlying_issuer
+FROM `pendle-data.analytics.market_meta`
+WHERE expiry_date > CURRENT_DATE()
+ORDER BY expiry_date
+```
+"""
+
+_PRICE_FEEDS = """\
+## `pendle-data.sentio_dump.price_feeds`
+
+Daily token prices. **Partition: date (DATE) — always filter on date.**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| date | DATE | Price date |
+| symbol | STRING | Token symbol (lowercase: "pendle", "btc", "eth", ...) |
+| avg_price | FLOAT64 | Average daily price in USD |
+
+### SQL Example
+```sql
+SELECT date AS dt, avg_price
+FROM `pendle-data.sentio_dump.price_feeds`
+WHERE symbol = 'pendle'
+  AND date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+ORDER BY date
+```
+"""
+
+_POOL_METRICS_LIFETIME = """\
+## `pendle-data.analytics.pool_metrics_lifetime`
+
+Lifetime aggregated stats per pool. One row per pool. No partition key.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| pool | STRING | Pool name |
+| chain | INT64 | Chain ID |
+| pool_ddl | DATE | Pool DDL date |
+| first_trade_dt | DATE | First trade date |
+| last_trade_dt | DATE | Last trade date |
+| min_implied_yield | FLOAT64 | Min IY over lifetime |
+| max_implied_yield | FLOAT64 | Max IY over lifetime |
+| avg_implied_yield | FLOAT64 | Avg IY over lifetime |
+| median_implied_yield | FLOAT64 | Median IY over lifetime |
+| avg_amm_tvl | FLOAT64 | Avg AMM TVL |
+| avg_overall_tvl | FLOAT64 | Avg overall TVL |
+| max_amm_tvl | FLOAT64 | Max AMM TVL |
+| max_overall_tvl | FLOAT64 | Max overall TVL |
+| avg_notional_trading_volume | FLOAT64 | Avg daily volume |
+| avg_notional_trading_volume_limit | FLOAT64 | Avg daily limit volume |
+| avg_notional_trading_volume_amm | FLOAT64 | Avg daily AMM volume |
+| avg_nodex_notional_trading_volume | FLOAT64 | Avg daily nodex volume |
+| avg_swap_fee_usd | FLOAT64 | Avg daily swap fees |
+| avg_implicit_swap_fee_usd | FLOAT64 | Avg daily implicit fees |
+| avg_limit_swap_fee_usd | FLOAT64 | Avg daily limit fees |
+| pool_active_days | INT64 | Days with trading activity |
+
+### SQL Example
+```sql
+SELECT CONCAT(pool, '_', chain) AS pool_id,
+  avg_overall_tvl, avg_implied_yield, pool_active_days
+FROM `pendle-data.analytics.pool_metrics_lifetime`
+ORDER BY avg_overall_tvl DESC LIMIT 10
+```
+"""
+
+
+# ── Pendle-specific tools ─────────────────────────────────────────────
+
+_USER_POOL_TVL_DAILY = """\
+## `pendle-data.user_token_balance.user_pool_tvl_daily`
+
+Per-user daily TVL by pool, broken down by token type.
+Grain: one row per (user, pool, chain_id, ds). Partition: `ds` (DATE).
+
+### Columns
+| Column | Type | Description |
+|--------|------|-------------|
+| ds | DATE | Date |
+| user | STRING | Wallet address |
+| pool | STRING | Pool name |
+| chain_id | INT64 | Chain ID |
+| base_asset | STRING | Pool base asset |
+| underlying_issuer | STRING | Yield provider |
+| yield_source | STRING | Yield category |
+| sy_balance / sy_tvl_usd | NUMERIC | SY token balance and USD value |
+| pt_balance / pt_tvl_usd | NUMERIC | PT token balance and USD value |
+| yt_balance / yt_tvl_usd | NUMERIC | YT token balance and USD value |
+| lp_balance / lp_tvl_usd | NUMERIC | LP token balance and USD value |
+| total_pool_tvl_usd | NUMERIC | Total TVL in pool (PT + YT + LP, excludes SY) |
+| token_types_count | INT64 | Distinct token types held (SY/PT/YT/LP) |
+
+### SQL Example
+```sql
+-- Top 10 users by TVL in a specific pool
+SELECT user, total_pool_tvl_usd, pt_tvl_usd, yt_tvl_usd, lp_tvl_usd
+FROM `pendle-data.user_token_balance.user_pool_tvl_daily`
+WHERE ds = DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+  AND pool = 'Ethena sUSDE 7MAY2026' AND chain_id = 1
+ORDER BY total_pool_tvl_usd DESC
+LIMIT 10
+```
+"""
+
+_USER_TVL_DAILY = """\
+## `pendle-data.user_token_balance.user_tvl_daily`
+
+Per-user daily TVL aggregated across all pools.
+Grain: one row per (user, ds). Partition: `ds` (DATE).
+
+### Columns
+| Column | Type | Description |
+|--------|------|-------------|
+| ds | DATE | Date |
+| user | STRING | Wallet address |
+| total_tvl_usd | NUMERIC | Total TVL across all pools |
+| total_sy_tvl_usd | NUMERIC | Total SY value across all pools |
+| total_pt_tvl_usd | NUMERIC | Total PT value across all pools |
+| total_yt_tvl_usd | NUMERIC | Total YT value across all pools |
+| total_lp_tvl_usd | NUMERIC | Total LP value across all pools |
+| active_pools_count | INT64 | Number of pools with holdings |
+| active_chains_count | INT64 | Number of chains with holdings |
+
+### SQL Example
+```sql
+-- Top 20 users by total TVL
+SELECT user, total_tvl_usd, active_pools_count, active_chains_count
+FROM `pendle-data.user_token_balance.user_tvl_daily`
+WHERE ds = DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+ORDER BY total_tvl_usd DESC
+LIMIT 20
+```
+"""
+
+_USER_STATS_PER_POOL = """\
+## `pendle-data.sentio_dump.user_stats_per_pool_daily_v2`
+
+Per-user daily trading stats by pool with cohort attributes.
+Grain: one row per (user_address, pool, chain_id, ds). Partition: `ds` (DATE).
+
+### Key Columns
+
+#### Identity & Cohort
+- `user_address`, `pool`, `chain_id`, `ds`
+- `yield_source`, `base_asset`, `underlying_issuer`
+- `first_txn_date` / `first_txn_ts`: user's first ever transaction
+- `days_since_first_txn`: tenure in days
+- `first_pool`, `first_chain_id`, `first_action_type`, `first_event_type`
+- `first_txn_value_usd`, `first_txn_notional_trading_volume`
+- `first_pool_yield_source`, `first_pool_base_asset`, `first_pool_underlying_issuer`
+
+#### Daily Trading Activity (flow → SUM)
+- `value_usd`: total USD value of transactions on this pool on this date
+- `notional_trading_volume`: total notional volume
+- `notional_trading_volume_limit`: limit order volume
+- `total_swap_fee_usd`: explicit swap fees
+- `total_limit_swap_fee_usd`: limit order fees
+- `total_implicit_swap_fee_usd`: implicit fees
+- `txn_ct`: transaction count
+
+#### Cross-Chain First Active Dates
+- `eth_first_active_ds`, `arb_first_active_ds`, `op_first_active_ds`,
+  `bsc_first_active_ds`, `mantle_first_active_ds`, `base_first_active_ds`,
+  `sonic_first_active_ds`, `bera_first_active_ds`, `hyperevm_first_active_ds`,
+  `plasma_first_active_ds`
+
+#### Wallet & Money Market
+- `wallet_agents_sorted`, `first_agent`: wallet agent associations
+- `syrup_first_use_date`, `morpho_first_use_date`, `euler_first_use_date`,
+  `dolomite_first_use_date`, `gearbox_first_use_date`, `zerolend_first_use_date`,
+  `avalon_first_use_date`: first PT collateral use per lending protocol
+
+### SQL Example
+```sql
+-- New users this week and their first action
+SELECT user_address, first_txn_date, first_pool, first_action_type,
+  first_txn_value_usd, first_pool_base_asset
+FROM `pendle-data.sentio_dump.user_stats_per_pool_daily_v2`
+WHERE ds = DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+  AND first_txn_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+ORDER BY first_txn_date DESC
+```
+"""
+
+_PT_COLLATERAL_DAILY = """\
+## `pendle-data.analytics.pt_collateral_daily_balance`
+
+Daily PT collateral balance across all lending protocols (money markets).
+Grain: one row per (`protocol`, `chain_name`, `asset_address`, `market_id`, `ds`).
+Partition: `ds` (DATE). Incremental.
+
+Covers 13 protocols: Aave, Avalon, Dolomite, Euler, Gearbox, Hyperlend, Lista,
+Morpho, RDNTCapital, Silo, Thetanuts_Finance, ZeroLend, maneki.finance.
+
+### Key Columns
+| Column | Type | Description |
+|--------|------|-------------|
+| ds | DATE | Date (partition key) |
+| protocol | STRING | Lending protocol name (Aave, Morpho, Euler, ...) |
+| chain_name | STRING | Blockchain name (ethereum, arbitrum, bnb, ...) |
+| chain_id | INT64 | Chain numeric ID |
+| pool | STRING | Pendle pool name |
+| asset_type | STRING | `PT` (native), `PT-CROSS` (cross-chain via OFT), `LP` |
+| asset_address | STRING | Token contract address |
+| market_id | STRING | Lending market identifier (Morpho market ID, or 'NA') |
+| balance | FLOAT64 | Total token balance in this market (token units, not USD) |
+| active_holders | INT64 | Users with balance > 0 on this day |
+| cumulative_holders | INT64 | Total users who ever held (historical) |
+| base_asset | STRING | Underlying asset type (ETH, Stable, BTC) |
+| asset_price | FLOAT64 | Token price on this day (balance × asset_price = USD value) |
+| expiry_date | DATE | PT expiry date |
+
+### Important Notes
+- `balance` is in **token units** — multiply by `asset_price` for USD value.
+- Same pool can appear multiple times per protocol if there are multiple `market_id`s (especially Morpho/Lista).
+- `PT-CROSS` = PT bridged via OFT to another chain (e.g. Ethereum PT used on BNB Lista). ~8% of total.
+- `LP` = LP token used as collateral (rare, ~0.001% of total).
+- This table resolves the limitation in pool_metrics where collateral cannot be broken down by protocol.
+
+### SQL Examples
+```sql
+-- PT collateral by protocol (latest day, USD value)
+SELECT protocol, asset_type,
+  ROUND(SUM(balance * asset_price), 2) AS total_usd,
+  SUM(active_holders) AS total_holders
+FROM `pendle-data.analytics.pt_collateral_daily_balance`
+WHERE ds = DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+GROUP BY 1, 2
+ORDER BY total_usd DESC
+
+-- PT collateral for a specific pool across all protocols
+SELECT ds, protocol, chain_name, asset_type,
+  ROUND(balance * asset_price, 2) AS usd_value, active_holders
+FROM `pendle-data.analytics.pt_collateral_daily_balance`
+WHERE ds >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+  AND pool = 'Ethena sUSDE 9APR2026'
+ORDER BY ds, protocol
+```
+"""
+
+_MM_USER_COLLATERAL_DAILY = """\
+## `pendle-data.analytics.mm_user_collateral_daily_balance`
+
+Per-user daily PT collateral balance in each lending protocol.
+Grain: one row per (`user`, `chain_id`, `mm_protocol`, `token_address`, `ds`).
+Partition: `ds` (DATE).
+
+Covers all protocols except Gearbox (Gearbox uses credit accounts, tracked separately
+in pt_collateral_daily_balance only).
+
+### Key Columns
+| Column | Type | Description |
+|--------|------|-------------|
+| ds | DATE | Date (partition key) |
+| user | STRING | Wallet address |
+| chain_id | INT64 | Chain ID |
+| mm_protocol | STRING | Lending protocol name |
+| token_address | STRING | PT/LP token contract address |
+| delta | FLOAT64 | Daily balance change (token units) |
+| raw_balance | NUMERIC | Cumulative raw balance (wei) |
+| balance | FLOAT64 | Normalized balance (token units) |
+| asset_price | FLOAT64 | Token price (balance × asset_price = USD) |
+
+### SQL Example
+```sql
+-- Top 10 users by PT collateral in Morpho (latest day)
+SELECT user, mm_protocol, token_address,
+  ROUND(balance * asset_price, 2) AS usd_value
+FROM `pendle-data.analytics.mm_user_collateral_daily_balance`
+WHERE ds = DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+  AND mm_protocol = 'Morpho'
+  AND balance > 0
+ORDER BY usd_value DESC
+LIMIT 10
+```
+"""
+
+_POOL_META_FIELDS = {
+    "pool_id": "CONCAT(pool, '_', chain_id) AS pool_id",
+    "expiry_date": "expiry_date",
+    "expiry_month": "DATE_TRUNC(expiry_date, MONTH) AS expiry_month",
+    "yield_source": "yield_source",
+    "base_asset": "base_asset",
+    "underlying_issuer": "underlying_issuer",
+    "chain": "chain",
+    "chain_id": "chain_id",
+    "market_id": "market_id",
+    "fee_tier": "fee_tier",
+    "yield_range_min": "yield_range_min",
+    "yield_range_max": "yield_range_max",
+    "first_log_dt": "first_log_dt",
+    "protocol_name": "protocol_name",
+    "community_flag": "community_flag",
+    "underlying_name": "underlying_name",
+    "accounting_asset_name": "accounting_asset_name",
+    "py_unit_name": "py_unit_name",
+    "initiated_by": "initiated_by",
+    "asset_desc": "asset_desc",
+}
+
+_ACTIVE_FIELDS = [
+    "pool_id", "expiry_date", "yield_source", "base_asset", "underlying_issuer",
+]
+
+_ALL_FIELDS = ["pool_id", "base_asset"]
+
+
+def _register_pendle_tools(mcp, track_fn):
+    """Register Pendle-specific MCP tools (pool discovery)."""
+
+    @mcp.tool(
+        description=(
+            "Get Pendle pool metadata. pool_id contains pool name + expiry "
+            "month + chain (e.g. 'Ethena sUSDE 7MAY2026_1').\n\n"
+            "is_active_only=true (default): returns active pools with full detail "
+            "(pool_id, expiry_date, yield_source, base_asset, "
+            "underlying_issuer).\n"
+            "is_active_only=false: returns ALL pools (including expired) with "
+            "minimal fields (pool_id, base_asset) for name matching.\n\n"
+            "Extra fields via 'fields' parameter: expiry_date, expiry_month, "
+            "yield_source, chain, chain_id, market_id, fee_tier, "
+            "yield_range_min, yield_range_max, first_log_dt, protocol_name, "
+            "community_flag, underlying_name, py_unit_name, "
+            "accounting_asset_name, initiated_by, asset_desc.\n\n"
+            "ALWAYS call this first when users mention pool names. "
+            "Fuzzy-match against pool_id to find exact pool_ids, "
+            "then use those in run_sql. NEVER use SQL LIKE patterns."
+        )
+    )
+    async def get_pendle_pools_tool(
+        is_active_only: bool = True,
+        fields: list[str] | None = None,
+    ) -> str:
+        track_fn("get_pendle_pools", is_active_only=is_active_only, fields=fields)
+        import json as _json
+        import pandas_gbq as _pgbq
+
+        if fields:
+            selected = fields
+        else:
+            selected = _ACTIVE_FIELDS if is_active_only else _ALL_FIELDS
+
+        invalid = [f for f in selected if f not in _POOL_META_FIELDS]
+        if invalid:
+            return _json.dumps({"error": f"Unknown fields: {invalid}. "
+                                f"Available: {list(_POOL_META_FIELDS.keys())}"})
+
+        if "pool_id" not in selected:
+            selected = ["pool_id"] + list(selected)
+
+        select_exprs = [_POOL_META_FIELDS[f] for f in selected]
+        sql = f"SELECT {', '.join(select_exprs)} FROM `pendle-data.analytics.market_meta`"
+        if is_active_only:
+            sql += " WHERE expiry_date > CURRENT_DATE()"
+        sql += " ORDER BY pool_id"
+
+        try:
+            df = _pgbq.read_gbq(sql, progress_bar_type=None)
+            if df.empty:
+                return _json.dumps({"error": "No pools found."})
+            for col in df.columns:
+                if df[col].dtype.name in ("datetime64[ns]", "dbdate"):
+                    df[col] = df[col].astype(str)
+            csv = df.to_csv(index=False)
+            return _json.dumps({"total_count": len(df), "data": csv})
+        except Exception as e:
+            return _json.dumps({"error": str(e)})
+
+
+# ── Product spec ──────────────────────────────────────────────────────
+
+SPEC = ProductSpec(
+    product_id="pendle",
+    display_name="Pendle Protocol",
+    tables=(
+        TableSpec(
+            "pendle-data.analytics.pool_metrics_all_in_one_daily",
+            partition_col="dt",
+            description=(
+                "Daily pool-level metrics. Grain: one row per pool per day.\n"
+                "Key metrics: TVL (overall_tvl, amm_tvl), volume (notional_trading_volume), "
+                "swap fees (explicit + implicit), yield fees (expected, realized), "
+                "implied yield, LP APY, emissions, campaigns, holder counts.\n"
+                "→ Use for: TVL, volume, fees, yield, emissions, holder analysis."
+            ),
+            catalog=_POOL_METRICS_DAILY,
+        ),
+        TableSpec(
+            "pendle-data.analytics.market_meta",
+            description=(
+                "Pool metadata / reference data. One row per pool.\n"
+                "Fields: pool name, chain, expiry_date, yield_source, base_asset, "
+                "underlying_issuer, fee_tier, yield_range, protocol_name, penco_meta.\n"
+                "→ Use for: pool discovery, name→ID mapping, JOIN to pool_metrics."
+            ),
+            catalog=_MARKET_META,
+        ),
+        TableSpec(
+            "pendle-data.sentio_dump.price_feeds",
+            partition_col="date",
+            description=(
+                "Daily token prices (PENDLE, BTC, ETH, and others).\n"
+                "Fields: date, symbol, avg_price.\n"
+                "→ Use for: token price lookups, market context."
+            ),
+            catalog=_PRICE_FEEDS,
+        ),
+        TableSpec(
+            "pendle-data.analytics.pool_metrics_lifetime",
+            description=(
+                "Lifetime aggregated stats per pool since inception.\n"
+                "Key metrics: min/max/avg/median implied yield, avg/max TVL, "
+                "avg daily volume, pool_active_days.\n"
+                "→ Use for: cross-pool comparison, historical performance."
+            ),
+            catalog=_POOL_METRICS_LIFETIME,
+        ),
+        # ── User-level tables ─────────────────────────────────────────
+        TableSpec(
+            "pendle-data.user_token_balance.user_pool_tvl_daily",
+            partition_col="ds",
+            description=(
+                "Per-user daily TVL by pool with token type breakdown (SY/PT/YT/LP).\n"
+                "Grain: (user, pool, chain_id, ds).\n"
+                "Key metrics: sy/pt/yt/lp_tvl_usd, total_pool_tvl_usd, token_types_count.\n"
+                "→ Use for: user holdings per pool, token composition, top holders."
+            ),
+            catalog=_USER_POOL_TVL_DAILY,
+        ),
+        TableSpec(
+            "pendle-data.user_token_balance.user_tvl_daily",
+            partition_col="ds",
+            description=(
+                "Per-user daily TVL aggregated across all pools.\n"
+                "Grain: (user, ds).\n"
+                "Key metrics: total_tvl_usd, total by token type, active_pools/chains_count.\n"
+                "→ Use for: top users by TVL, user portfolio summary, whale tracking."
+            ),
+            catalog=_USER_TVL_DAILY,
+        ),
+        TableSpec(
+            "pendle-data.sentio_dump.user_stats_per_pool_daily_v2",
+            partition_col="ds",
+            description=(
+                "Per-user daily trading stats by pool with cohort attributes.\n"
+                "Grain: (user_address, pool, chain_id, ds).\n"
+                "Key metrics: value_usd, notional_trading_volume, swap fees, txn_ct, "
+                "first_txn_date, days_since_first_txn, cross-chain first active dates, "
+                "money market first use dates.\n"
+                "→ Use for: user trading activity, cohort analysis, new user tracking, retention."
+            ),
+            catalog=_USER_STATS_PER_POOL,
+        ),
+        # ── PT Collateral tables ──────────────────────────────────────
+        TableSpec(
+            "pendle-data.analytics.pt_collateral_daily_balance",
+            partition_col="ds",
+            description=(
+                "Daily PT collateral balance across all lending protocols (13 MMs).\n"
+                "Grain: (protocol, chain_name, asset_address, market_id, ds).\n"
+                "Key metrics: balance (token units), asset_price, active/cumulative holders, "
+                "asset_type (PT / PT-CROSS / LP).\n"
+                "→ Use for: PT collateral by protocol, chain, pool; protocol-level breakdown "
+                "that pool_metrics cannot provide."
+            ),
+            catalog=_PT_COLLATERAL_DAILY,
+        ),
+        TableSpec(
+            "pendle-data.analytics.mm_user_collateral_daily_balance",
+            partition_col="ds",
+            description=(
+                "Per-user daily PT collateral balance in each lending protocol.\n"
+                "Grain: (user, chain_id, mm_protocol, token_address, ds).\n"
+                "Key metrics: balance, delta, asset_price.\n"
+                "→ Use for: top PT collateral holders, per-user breakdown by protocol.\n"
+                "Note: covers all protocols except Gearbox."
+            ),
+            catalog=_MM_USER_COLLATERAL_DAILY,
+        ),
+    ),
+    context=_CONTEXT,
+    tool_description=(
+        "Returns the Pendle data catalog INDEX: business context, analysis rules, "
+        "and table summaries with key metrics.\n\n"
+        "CALL THIS FIRST before writing any Pendle SQL query. "
+        "Then call get_table_detail(table_name) for full column definitions."
+    ),
+    register_extra_tools=_register_pendle_tools,
+)
