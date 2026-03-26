@@ -367,16 +367,16 @@ def register_tools(mcp: FastMCP):
     _CHANGELOG = (
         "# MCP Server Changelog (last 10 updates)\n"
         "\n"
-        "1. 2026-03-25T03:46:48Z (e5b4a3e) — Update Boros event types catalog to match latest tracking spec\n"
-        "2. 2026-03-24T10:01:04Z (79841a1) — Instruct model to report data_gap instead of guessing\n"
-        "3. 2026-03-24T09:47:51Z (ea139c1) — Save model and user_email in learning reports\n"
-        "4. 2026-03-23T08:39:29Z (8f998bb) — Add PT collateral tables, FQ table names in all catalogs, Boros SQL examples\n"
-        "5. 2026-03-20T08:22:13Z (91271bd) — Add get_dashboard_meta MCP tool with TTL cache and fallback instruction\n"
-        "6. 2026-03-20T08:01:12Z (cbc747a) — Add data_gap category to report_learning for missing data reporting\n"
-        "7. 2026-03-20T07:53:01Z (1095d9c) — Require model, task, and query_purpose audit fields on run_sql\n"
-        "8. 2026-03-20T07:36:10Z (cf412ec) — Harden MCP server security: block tableless queries, sanitize errors, fix path traversal\n"
-        "9. 2026-03-20T07:05:27Z (d1e62f5) — Add QA knowledge base tools (ask_pendle, ask_boros, ask_*_developer)\n"
-        "10. 2026-03-19T15:33:38Z (576e5b0) — Add Frontend Tracking product with V2 and Boros enriched event tables\n"
+        "1. 2026-03-26T11:10:22Z (316b185) — Add limit_order_ob_depth_hourly and user_aaarr_metrics tables\n"
+        "2. 2026-03-25T03:46:48Z (e5b4a3e) — Update Boros event types catalog to match latest tracking spec\n"
+        "3. 2026-03-24T10:01:04Z (79841a1) — Instruct model to report data_gap instead of guessing\n"
+        "4. 2026-03-24T09:47:51Z (ea139c1) — Save model and user_email in learning reports\n"
+        "5. 2026-03-23T08:39:29Z (8f998bb) — Add PT collateral tables, FQ table names in all catalogs, Boros SQL examples\n"
+        "6. 2026-03-20T08:22:13Z (91271bd) — Add get_dashboard_meta MCP tool with TTL cache and fallback instruction\n"
+        "7. 2026-03-20T08:01:12Z (cbc747a) — Add data_gap category to report_learning for missing data reporting\n"
+        "8. 2026-03-20T07:53:01Z (1095d9c) — Require model, task, and query_purpose audit fields on run_sql\n"
+        "9. 2026-03-20T07:36:10Z (cf412ec) — Harden MCP server security: block tableless queries, sanitize errors, fix path traversal\n"
+        "10. 2026-03-20T07:05:27Z (d1e62f5) — Add QA knowledge base tools (ask_pendle, ask_boros, ask_*_developer)\n"
     )
 
     @mcp.tool(
