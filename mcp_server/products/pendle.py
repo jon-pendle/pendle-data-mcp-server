@@ -569,6 +569,87 @@ LIMIT 10
 ```
 """
 
+_LIMIT_ORDER_OB_DEPTH = """\
+## `pendle-data.pendle_api.limit_order_ob_depth_hourly`
+
+Hourly limit order orderbook depth by implied yield bucket. One row per (hour, chain_id, yt, iy_bucket).
+**Partition: DATE(hour) — always filter on DATE(hour).**
+Join to market_meta: `LOWER(ob.yt) = LOWER(mm.yt_address) AND CAST(ob.chain_id AS STRING) = CAST(mm.chain_id AS STRING)`.
+
+### Key Concepts
+
+Four order types forming two-sided PT and YT books:
+- **TOKEN_FOR_PT** (PT bid): taker pays tokens, receives PT. Bids rest at IY > mid.
+- **PT_FOR_TOKEN** (PT ask): maker provides PT for tokens. Asks rest at IY < mid.
+- **TOKEN_FOR_YT** (YT bid): taker pays tokens, receives YT. Bids rest at IY < mid.
+- **YT_FOR_TOKEN** (YT ask): maker provides YT for tokens. Asks rest at IY > mid.
+
+`iy_bucket` = INT64, implied_yield × 1000. Each bucket = 10 bps interval.
+Cumulative columns pre-compute running depth (no need to self-join):
+- ASC cumulation (TOKEN_FOR_PT, YT_FOR_TOKEN): depth(N) = SUM of buckets ≤ N.
+- DESC cumulation (PT_FOR_TOKEN, TOKEN_FOR_YT): depth(N) = SUM of buckets ≥ N.
+
+### Columns
+
+#### Dimensions
+| Column | Type | Description |
+|--------|------|-------------|
+| hour | DATETIME | Snapshot hour (partition by DATE(hour)) |
+| chain_id | INT64 | Chain ID |
+| yt | STRING | YT token address |
+| pool_name | STRING | Pool name (from market_meta join) |
+| market_expiry | TIMESTAMP | Market expiry |
+| iy_bucket | INT64 | Implied yield bucket (IY × 1000) |
+
+#### Per-bucket size (flow → SUM across buckets for total depth)
+| Column | Description | Unit |
+|--------|-------------|------|
+| token_for_pt_size_usd | PT bid size at this bucket | USD |
+| token_for_pt_size_pt | PT bid size | PT tokens |
+| token_for_pt_order_count | PT bid order count | count |
+| pt_for_token_size_usd | PT ask size at this bucket | USD |
+| pt_for_token_size_pt | PT ask size | PT tokens |
+| pt_for_token_order_count | PT ask order count | count |
+| token_for_yt_size_usd | YT bid size at this bucket | USD |
+| token_for_yt_size_yt | YT bid size | YT tokens |
+| token_for_yt_order_count | YT bid order count | count |
+| yt_for_token_size_usd | YT ask size at this bucket | USD |
+| yt_for_token_size_yt | YT ask size | YT tokens |
+| yt_for_token_order_count | YT ask order count | count |
+
+#### Pre-computed cumulative depth
+| Column | Description | Direction |
+|--------|-------------|-----------|
+| token_for_pt_cumulative_usd / _pt | PT bid depth up to this bucket | ASC (≤ bucket) |
+| pt_for_token_cumulative_usd / _pt | PT ask depth from this bucket | DESC (≥ bucket) |
+| token_for_yt_cumulative_usd / _yt | YT bid depth from this bucket | DESC (≥ bucket) |
+| yt_for_token_cumulative_usd / _yt | YT ask depth up to this bucket | ASC (≤ bucket) |
+
+### Aggregation Rules
+- Per-bucket size: SUM across buckets for total depth; SUM across hours for volume over time.
+- Cumulative columns: do NOT SUM across buckets (already cumulated). Read the value at a specific bucket for depth at that IY level.
+- Across pools: SUM USD columns; do NOT sum token columns across different pools.
+
+### SQL Examples
+
+#### Total PT bid/ask depth for a pool at latest hour
+```sql
+WITH latest AS (
+  SELECT MAX(hour) AS h
+  FROM `pendle-data.pendle_api.limit_order_ob_depth_hourly`
+  WHERE DATE(hour) >= DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+    AND pool_name = 'Ethena sUSDE 29MAY2025'
+)
+SELECT iy_bucket,
+  token_for_pt_cumulative_usd AS pt_bid_depth_usd,
+  pt_for_token_cumulative_usd AS pt_ask_depth_usd
+FROM `pendle-data.pendle_api.limit_order_ob_depth_hourly`, latest
+WHERE hour = latest.h
+  AND pool_name = 'Ethena sUSDE 29MAY2025'
+ORDER BY iy_bucket
+```
+"""
+
 _POOL_META_FIELDS = {
     "pool_id": "CONCAT(pool, '_', chain_id) AS pool_id",
     "expiry_date": "expiry_date",
@@ -770,6 +851,20 @@ SPEC = ProductSpec(
                 "Note: covers all protocols except Gearbox."
             ),
             catalog=_MM_USER_COLLATERAL_DAILY,
+        ),
+        # ── Limit order orderbook depth ──────────────────────────────────
+        TableSpec(
+            "pendle-data.pendle_api.limit_order_ob_depth_hourly",
+            partition_col="DATE(hour)",
+            description=(
+                "Hourly limit order orderbook depth by IY bucket. "
+                "Grain: (hour, chain_id, yt, iy_bucket).\n"
+                "Key metrics: per-bucket size (USD/tokens) for PT bid/ask and YT bid/ask, "
+                "pre-computed cumulative depth, order counts.\n"
+                "→ Use for: orderbook depth analysis, liquidity distribution by IY level, "
+                "bid-ask spread, limit order activity."
+            ),
+            catalog=_LIMIT_ORDER_OB_DEPTH,
         ),
     ),
     context=_CONTEXT,

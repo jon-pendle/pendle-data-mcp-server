@@ -505,6 +505,79 @@ ORDER BY dt
 ```
 """
 
+_USER_AAARR_METRICS = """\
+## `pendle-data.boros_analytics.user_aaarr_metrics`
+
+Boros AARRR funnel metrics per daily calc_point. One row per day, aggregated across all users.
+**Partition: calc_point (DATE) — always filter on calc_point.**
+
+⚠️ This is NOT a strict cohort funnel. Uses unconventional stage definitions specific to Boros.
+Obs windows: 7d and 30d. Retention qualification: fixed 60d.
+
+### Funnel Stages
+
+1. **Awareness**: wallet connected (from Mixpanel frontend events)
+2. **Consideration**: deposit modal opened → deposit initiated → order submitted (from Mixpanel)
+3. **Activation**: first-ever taker trade falls within obs window (from on-chain data)
+4. **Engagement**: ≥3 trades within obs window
+5. **Monetization**: ≥1 trade in obs window AND cumulative LTV > $50
+6. **Retention**: qualified (≥1 trade in past 60d) then confirmed by trading in future windows
+
+### Key Column Groups
+
+#### Awareness (from Mixpanel wallet_connected events)
+- `awareness_wallet_connected_{7d,30d}`: user count
+- `awareness_wallet_connected_{7d,30d}_new_user`: new user count (no trade before calc_point)
+- `awareness_wallet_connected_{7d,30d}_avg_ltv`: average LTV of connected users
+
+#### Consideration (from Mixpanel deposit/order events)
+- `consideration_deposit_modal_opened_{7d,30d}` / `_new_user` / `_avg_ltv`
+- `consideration_deposit_initiated_{7d,30d}` / `_new_user` / `_avg_ltv`
+- `consideration_order_submitted_{7d,30d}` / `_new_user` / `_avg_ltv`
+
+#### Activation (first trade in obs window)
+- `activation_{7d,30d}_user_count` / `_avg_ltv`
+
+#### Engagement (≥3 trades in obs window)
+- `engagement_{7d,30d}_user_count` / `_avg_ltv`
+
+#### Monetization (≥1 trade + LTV > $50)
+- `monetization_{7d,30d}_user_count` / `_avg_ltv`
+
+#### Retention (qualified + confirmed by future trading)
+- `retention_qualified_user_count`: users with ≥1 trade in past 60d (shared denominator)
+- `retention_{30d,60d,90d}_user_count` / `_avg_ltv`: confirmed retained users
+- `retention_{30d,60d,90d}_user_count_{30d,60d,90d}_back`: LAG values for time comparison
+
+⚠️ Retention columns are NULL until the confirmation window has fully closed.
+- 30d retention: NULL for calc_points within last 30 days
+- 60d retention: NULL for calc_points within last 60 days
+- 90d retention: NULL for calc_points within last 90 days
+
+### Aggregation Rules
+- All counts are pre-aggregated across users. Do NOT SUM across calc_points.
+- For weekly/monthly: use AVG for counts, AVG for avg_ltv.
+- Retention rate = retention_Xd_user_count / retention_qualified_user_count.
+
+### LTV Definition
+LTV = cumulative (limit_order_swap_fees + all_otc_fees + settlement_fees) from first trade to calc_point.
+
+### SQL Example
+```sql
+-- Weekly AARRR funnel summary
+SELECT DATE_TRUNC(calc_point, WEEK) AS week,
+  AVG(awareness_wallet_connected_7d) AS avg_awareness,
+  AVG(activation_7d_user_count) AS avg_activation,
+  AVG(engagement_7d_user_count) AS avg_engagement,
+  AVG(monetization_7d_user_count) AS avg_monetization,
+  AVG(retention_30d_user_count) AS avg_retained_30d,
+  AVG(SAFE_DIVIDE(retention_30d_user_count, retention_qualified_user_count)) AS avg_retention_rate_30d
+FROM `pendle-data.boros_analytics.user_aaarr_metrics`
+WHERE calc_point >= '2026-01-01' AND calc_point <= '2026-03-25'
+GROUP BY week ORDER BY week
+```
+"""
+
 _BOROS_META_FIELDS = {
     "market_id": "id AS market_id",
     "market_name": "name AS market_name",
@@ -733,6 +806,19 @@ SPEC = ProductSpec(
                 "→ Use for: token price lookups for Boros-specific symbols."
             ),
             catalog=_PRICE_FEEDS,
+        ),
+        # ── AARRR funnel metrics ──────────────────────────────────────
+        TableSpec(
+            "pendle-data.boros_analytics.user_aaarr_metrics",
+            partition_col="calc_point",
+            description=(
+                "Daily AARRR funnel metrics (Awareness → Activation → Engagement → Monetization → Retention).\n"
+                "Grain: one row per calc_point (day), pre-aggregated across all users.\n"
+                "Key metrics: user counts + avg LTV per stage, 7d/30d obs windows, "
+                "retention 30d/60d/90d with LAG comparisons.\n"
+                "→ Use for: funnel conversion analysis, retention tracking, user growth trends."
+            ),
+            catalog=_USER_AAARR_METRICS,
         ),
         # ── Add new Boros tables here ──────────────────────────────────
     ),
