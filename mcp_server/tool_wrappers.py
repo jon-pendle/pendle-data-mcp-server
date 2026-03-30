@@ -12,7 +12,7 @@ import logging
 
 from mcp.server.fastmcp import FastMCP
 
-from .products import get_all_products, get_all_partition_tables, build_product_index, get_table_detail as _lookup_table_detail, get_all_table_names
+from .products import get_all_products, get_all_partition_tables, build_product_index, get_table_detail as _lookup_table_detail
 from .sql_executor import execute_sql
 from .memory import save_learning
 from .usage_tracker import track_tool_call
@@ -60,7 +60,7 @@ async def _guard(tool_name: str, product_id: str | None = None) -> str | None:
     return None
 
 
-# ── Per-product catalog tool factory ──────────────────────────────────
+# ── Per-product tool factories ─────────────────────────────────────────
 
 def _register_product_catalog_tool(mcp: FastMCP, product) -> None:
     """Register a get_<product_id>_data_catalog tool that returns the index."""
@@ -76,6 +76,25 @@ def _register_product_catalog_tool(mcp: FastMCP, product) -> None:
         return index_text
 
 
+def _register_product_table_detail_tool(mcp: FastMCP, product) -> None:
+    """Register a get_<product_id>_table_detail tool for full column/schema lookup."""
+    tool_name = f"get_{product.product_id}_table_detail"
+    product_id = product.product_id
+
+    @mcp.tool(name=tool_name, description=product.table_detail_description)
+    async def _table_detail_tool(table_name: str) -> str:
+        if err := await _guard(tool_name, product_id=product_id):
+            return json.dumps({"error": err, "error_type": "permission"})
+        _track(tool_name, table_name=table_name)
+        catalog = _lookup_table_detail(product_id, table_name)
+        if catalog is None:
+            return json.dumps({
+                "error": f"Table '{table_name}' not found in product '{product_id}'.",
+                "error_type": "validation",
+            })
+        return catalog
+
+
 # ── Main registration entry point ────────────────────────────────────
 
 def register_tools(mcp: FastMCP):
@@ -84,34 +103,9 @@ def register_tools(mcp: FastMCP):
     # ── Per-product tools ─────────────────────────────────────────────
     for product in get_all_products():
         _register_product_catalog_tool(mcp, product)
+        _register_product_table_detail_tool(mcp, product)
         if product.register_extra_tools:
             product.register_extra_tools(mcp, _track)
-
-    # ── Shared: Table Detail ─────────────────────────────────────────
-
-    product_ids = ", ".join(sorted(p.product_id for p in get_all_products()))
-
-    @mcp.tool(
-        description=(
-            "Get full column definitions, aggregation rules, and SQL examples "
-            "for a specific table. Call this after reading the product catalog index "
-            "to get detailed info for the table you need to query.\n\n"
-            f"product: product ID ({product_ids}).\n"
-            "table_name: short table name from the catalog index (e.g. 'pool_metrics_all_in_one_daily')."
-        )
-    )
-    async def get_table_detail(product: str, table_name: str) -> str:
-        """Return the full catalog for a specific table within a product."""
-        if err := await _guard("get_table_detail"):
-            return json.dumps({"error": err, "error_type": "permission"})
-        _track("get_table_detail", product=product, table_name=table_name)
-        catalog = _lookup_table_detail(product, table_name)
-        if catalog is None:
-            return json.dumps({
-                "error": f"Table '{table_name}' not found in product '{product}'.",
-                "error_type": "validation",
-            })
-        return catalog
 
     # ── Shared: SQL Executor ──────────────────────────────────────────
 
@@ -367,16 +361,16 @@ def register_tools(mcp: FastMCP):
     _CHANGELOG = (
         "# MCP Server Changelog (last 10 updates)\n"
         "\n"
-        "1. 2026-03-26T11:10:22Z (316b185) — Add limit_order_ob_depth_hourly and user_aaarr_metrics tables\n"
-        "2. 2026-03-25T03:46:48Z (e5b4a3e) — Update Boros event types catalog to match latest tracking spec\n"
-        "3. 2026-03-24T10:01:04Z (79841a1) — Instruct model to report data_gap instead of guessing\n"
-        "4. 2026-03-24T09:47:51Z (ea139c1) — Save model and user_email in learning reports\n"
-        "5. 2026-03-23T08:39:29Z (8f998bb) — Add PT collateral tables, FQ table names in all catalogs, Boros SQL examples\n"
-        "6. 2026-03-20T08:22:13Z (91271bd) — Add get_dashboard_meta MCP tool with TTL cache and fallback instruction\n"
-        "7. 2026-03-20T08:01:12Z (cbc747a) — Add data_gap category to report_learning for missing data reporting\n"
-        "8. 2026-03-20T07:53:01Z (1095d9c) — Require model, task, and query_purpose audit fields on run_sql\n"
-        "9. 2026-03-20T07:36:10Z (cf412ec) — Harden MCP server security: block tableless queries, sanitize errors, fix path traversal\n"
-        "10. 2026-03-20T07:05:27Z (d1e62f5) — Add QA knowledge base tools (ask_pendle, ask_boros, ask_*_developer)\n"
+        "1. 2026-03-30T00:00:00Z (tbd) — Split get_table_detail into per-product tools with product-specific descriptions\n"
+        "2. 2026-03-26T11:10:22Z (316b185) — Add limit_order_ob_depth_hourly and user_aaarr_metrics tables\n"
+        "3. 2026-03-25T03:46:48Z (e5b4a3e) — Update Boros event types catalog to match latest tracking spec\n"
+        "4. 2026-03-24T10:01:04Z (79841a1) — Instruct model to report data_gap instead of guessing\n"
+        "5. 2026-03-24T09:47:51Z (ea139c1) — Save model and user_email in learning reports\n"
+        "6. 2026-03-23T08:39:29Z (8f998bb) — Add PT collateral tables, FQ table names in all catalogs, Boros SQL examples\n"
+        "7. 2026-03-20T08:22:13Z (91271bd) — Add get_dashboard_meta MCP tool with TTL cache and fallback instruction\n"
+        "8. 2026-03-20T08:01:12Z (cbc747a) — Add data_gap category to report_learning for missing data reporting\n"
+        "9. 2026-03-20T07:53:01Z (1095d9c) — Require model, task, and query_purpose audit fields on run_sql\n"
+        "10. 2026-03-20T07:36:10Z (cf412ec) — Harden MCP server security: block tableless queries, sanitize errors, fix path traversal\n"
     )
 
     @mcp.tool(

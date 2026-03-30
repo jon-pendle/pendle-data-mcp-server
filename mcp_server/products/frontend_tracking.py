@@ -287,7 +287,13 @@ SPEC = ProductSpec(
     tool_description=(
         "Returns the Frontend Tracking catalog INDEX: enriched Mixpanel event tables "
         "for V2 and Boros, with on-chain enrichment details and funnel analysis patterns.\n\n"
-        "CALL THIS when analyzing user behavior, conversion funnels, or feature attribution."
+        "CALL THIS when analyzing user behavior, conversion funnels, or feature attribution. "
+        "Then call get_frontend_tracking_table_detail(table_name) for full column definitions."
+    ),
+    table_detail_description=(
+        "Full column definitions, aggregation rules, and SQL examples for a "
+        "Frontend Tracking table (enriched Mixpanel events for Pendle V2 and Boros).\n\n"
+        "Available tables: v2_mixpanel_events_enriched, boros_mixpanel_events_enriched."
     ),
     register_extra_tools=None,
 )

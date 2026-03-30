@@ -872,7 +872,16 @@ SPEC = ProductSpec(
         "Returns the Pendle data catalog INDEX: business context, analysis rules, "
         "and table summaries with key metrics.\n\n"
         "CALL THIS FIRST before writing any Pendle SQL query. "
-        "Then call get_table_detail(table_name) for full column definitions."
+        "Then call get_pendle_table_detail(table_name) for full column definitions."
+    ),
+    table_detail_description=(
+        "Full column definitions, aggregation rules, and SQL examples for a "
+        "Pendle Protocol table (also known as Pendle v2 or 'v2'). "
+        "For Boros margin trading data, use get_boros_table_detail instead.\n\n"
+        "Available tables: pool_metrics_all_in_one_daily, market_meta, price_feeds, "
+        "pool_metrics_lifetime, user_pool_tvl_daily, user_tvl_daily, "
+        "user_stats_per_pool_daily_v2, pt_collateral_daily_balance, "
+        "mm_user_collateral_daily_balance, limit_order_ob_depth_hourly."
     ),
     register_extra_tools=_register_pendle_tools,
 )

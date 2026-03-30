@@ -222,7 +222,13 @@ SPEC = ProductSpec(
         "(CRITICAL — funding_rate units differ between tables), exchange name "
         "casing warnings, and table summaries.\n\n"
         "CALL THIS FIRST before querying any funding rate table. "
-        "Then call get_table_detail(table_name) for full column definitions."
+        "Then call get_market_funding_rate_table_detail(table_name) for full column definitions."
+    ),
+    table_detail_description=(
+        "Full column definitions, aggregation rules, and SQL examples for a "
+        "Market Funding Rate table (cross-exchange perpetual funding rates). "
+        "NOT Pendle or Boros protocol data.\n\n"
+        "Available tables: market_funding_rate, pair_timeseries, funding_rate_pairs_analysis."
     ),
     register_extra_tools=None,
 )

@@ -827,7 +827,16 @@ SPEC = ProductSpec(
         "Returns the Boros data catalog INDEX: business context (YU, fees, OI conventions), "
         "data_source policy, and table summaries with key metrics.\n\n"
         "CALL THIS FIRST before writing any Boros SQL query. "
-        "Then call get_table_detail(table_name) for full column definitions."
+        "Then call get_boros_table_detail(table_name) for full column definitions."
+    ),
+    table_detail_description=(
+        "Full column definitions, aggregation rules, and SQL examples for a "
+        "Boros Protocol table (margin yield trading / interest rate swaps). "
+        "For Pendle v2 core data, use get_pendle_table_detail instead.\n\n"
+        "Available tables: market_metrics_all_in_one_daily, market_meta, "
+        "orderbook_snapshot_hourly, user_market_metric_all_in_one_daily, "
+        "user_margin_balance_daily, user_eod_position_summary, "
+        "price_feeds, user_aaarr_metrics."
     ),
     register_extra_tools=_register_boros_tools,
 )

@@ -37,7 +37,8 @@ class ProductSpec:
     display_name: str
     tables: tuple[TableSpec, ...]
     context: str              # product-level business rules (returned with index)
-    tool_description: str
+    tool_description: str     # description for get_<product_id>_data_catalog
+    table_detail_description: str = ""  # description for get_<product_id>_table_detail
     register_extra_tools: Callable[["FastMCP", Callable], None] | None = None
 
 
@@ -114,7 +115,10 @@ def build_product_index(product: ProductSpec) -> str:
         if t.description:
             lines.append(t.description)
         lines.append("")
-    lines.append("Call get_table_detail(table_name) for full column definitions and SQL examples.")
+    lines.append(
+        f"Call get_{product.product_id}_table_detail(table_name) "
+        "for full column definitions and SQL examples."
+    )
     return "\n".join(lines)
 
 
