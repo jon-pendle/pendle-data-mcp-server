@@ -116,7 +116,7 @@ def build_product_index(product: ProductSpec) -> str:
             lines.append(t.description)
         lines.append("")
     lines.append(
-        f"Call get_{product.product_id}_table_detail(table_name) "
+        f"Call get_table_detail(product_id=\"{product.product_id}\", table_name=...) "
         "for full column definitions and SQL examples."
     )
     return "\n".join(lines)
