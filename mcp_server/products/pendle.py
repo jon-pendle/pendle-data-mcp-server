@@ -129,9 +129,11 @@ Pendle Revenue = swap fees + yield fees.
 | avg_daily_realized_yield_fee_in_usd | Actually claimed fees, epoch-averaged | USD |
 
 ⚠️ CRITICAL RULES:
-- Combine expected_yield_fee + expected_expire_fee as "total expected yield fees".
-- NEVER sum expected + realized — fundamentally different methodologies.
+- Always present BOTH expected and realized perspectives separately.
+- Combine expected_yield_fee + expected_expire_fee as "total expected yield fees" (unless user asks to separate).
+- NEVER sum expected + realized — fundamentally different metrics (theoretical vs actually settled).
 - NEVER multiply avg_daily_realized_yield_fee_in_usd by days — it is epoch-based.
+- For aggregated metrics over a date range, use SUM() directly on the daily rows.
 
 #### Yield Rates — rate metrics (cross-day: TVL-weighted average)
 | Column | Description | Unit |
@@ -857,12 +859,12 @@ SPEC = ProductSpec(
             "pendle-data.pendle_api.limit_order_ob_depth_hourly",
             partition_col="DATE(hour)",
             description=(
-                "Hourly limit order orderbook depth by IY bucket. "
+                "Pendle v2 (V2) limit order orderbook depth by IY bucket. "
                 "Grain: (hour, chain_id, yt, iy_bucket).\n"
                 "Key metrics: per-bucket size (USD/tokens) for PT bid/ask and YT bid/ask, "
                 "pre-computed cumulative depth, order counts.\n"
-                "→ Use for: orderbook depth analysis, liquidity distribution by IY level, "
-                "bid-ask spread, limit order activity."
+                "→ Use for: Pendle V2 orderbook depth, liquidity distribution by IY level, "
+                "bid-ask spread, limit order activity. NOT Boros orderbook."
             ),
             catalog=_LIMIT_ORDER_OB_DEPTH,
         ),

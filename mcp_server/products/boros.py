@@ -751,11 +751,13 @@ SPEC = ProductSpec(
             partition_col="snapshot_dt",
             require_production_source=True,
             description=(
-                "Hourly orderbook depth snapshots. Grain: (data_source, market_id, snapshot_dt).\n"
+                "Boros Protocol hourly orderbook depth snapshots. "
+                "Grain: (data_source, market_id, snapshot_dt).\n"
                 "Key metrics: liquidity depth by user type (organic/MM/ExMM/inMM/AMM) × "
                 "side (long/short) × threshold (30bps/120bps/300bps/MRD/t1/t2), "
                 "spread, best bid/ask APR, OI.\n"
-                "→ Use for: orderbook depth, spread, liquidity composition, MM vs organic breakdown."
+                "→ Use for: Boros orderbook depth, spread, liquidity composition, MM vs organic breakdown. "
+                "NOT Pendle v2 orderbook."
             ),
             catalog=_ORDERBOOK_SNAPSHOT,
         ),

@@ -95,7 +95,8 @@ def _pre_validate(sql: str) -> str | None:
     # 2. Partition filter check (text-based, runs before dry-run to give early feedback)
     for table_name, partition_col in PARTITION_TABLES.items():
         if table_name in stripped:
-            pattern = rf"\b{partition_col}\b\s*(>=|<=|=|>|<|BETWEEN|IN)"
+            escaped = re.escape(partition_col)
+            pattern = rf"{escaped}\s*(>=|<=|=|>|<|BETWEEN|IN)"
             if not re.search(pattern, stripped, re.IGNORECASE):
                 return (
                     f"Query references '{table_name}' but does not filter on "
