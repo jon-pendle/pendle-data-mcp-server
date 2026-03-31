@@ -48,7 +48,7 @@ pendle-data-mcp-server/
 
 ## Commit Rules
 
-- **MCP Changelog**: When committing changes, update the `_CHANGELOG` string in `mcp_server/tool_wrappers.py`. Prepend the new entry (with ISO timestamp and short commit hash) and remove the oldest entry to keep exactly 10 items. Use the format: `N. <ISO8601>Z (<hash>) — <commit message>`
+- **MCP Changelog**: When committing changes, update the `_CHANGELOG` string in `mcp_server/tool_wrappers.py`. Prepend the new entry and remove the oldest entry to keep exactly 10 items. Use the format: `N. YYYY-MM-DD — <commit message>`
 
 ## Testing
 

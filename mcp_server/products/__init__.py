@@ -147,3 +147,5 @@ from .market_funding_rate import SPEC as _market_funding_rate  # noqa: E402
 register_product(_market_funding_rate)
 from .frontend_tracking import SPEC as _frontend_tracking  # noqa: E402
 register_product(_frontend_tracking)
+from .twitter_engagement import SPEC as _twitter_engagement  # noqa: E402
+register_product(_twitter_engagement)

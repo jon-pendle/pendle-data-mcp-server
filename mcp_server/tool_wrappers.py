@@ -403,16 +403,16 @@ def register_tools(mcp: FastMCP):
     _CHANGELOG = (
         "# MCP Server Changelog (last 10 updates)\n"
         "\n"
-        "1. 2026-03-31T00:00:00Z (tbd) — Merge per-product table_detail tools into single get_table_detail(product_id, table_name)\n"
-        "2. 2026-03-31T00:00:00Z (1145432) — Add yield fee return instructions and improve catalog descriptions\n"
-        "3. 2026-03-26T11:10:22Z (316b185) — Add limit_order_ob_depth_hourly and user_aaarr_metrics tables\n"
-        "4. 2026-03-25T03:46:48Z (e5b4a3e) — Update Boros event types catalog to match latest tracking spec\n"
-        "5. 2026-03-24T10:01:04Z (79841a1) — Instruct model to report data_gap instead of guessing\n"
-        "6. 2026-03-24T09:47:51Z (ea139c1) — Save model and user_email in learning reports\n"
-        "7. 2026-03-23T08:39:29Z (8f998bb) — Add PT collateral tables, FQ table names in all catalogs, Boros SQL examples\n"
-        "8. 2026-03-20T08:22:13Z (91271bd) — Add get_dashboard_meta MCP tool with TTL cache and fallback instruction\n"
-        "9. 2026-03-20T08:01:12Z (cbc747a) — Add data_gap category to report_learning for missing data reporting\n"
-        "10. 2026-03-20T07:53:01Z (1095d9c) — Require model, task, and query_purpose audit fields on run_sql\n"
+        "1. 2026-03-31 — Add twitter_engagement product (tweet_engagement_delta_hourly, tweet_basic_infos_latest_hourly)\n"
+        "2. 2026-03-31 — Merge per-product table_detail tools into single get_table_detail(product_id, table_name)\n"
+        "3. 2026-03-31 — Add yield fee return instructions and improve catalog descriptions\n"
+        "4. 2026-03-26 — Add limit_order_ob_depth_hourly and user_aaarr_metrics tables\n"
+        "5. 2026-03-25 — Update Boros event types catalog to match latest tracking spec\n"
+        "6. 2026-03-24 — Instruct model to report data_gap instead of guessing\n"
+        "7. 2026-03-24 — Save model and user_email in learning reports\n"
+        "8. 2026-03-23 — Add PT collateral tables, FQ table names in all catalogs, Boros SQL examples\n"
+        "9. 2026-03-20 — Add get_dashboard_meta MCP tool with TTL cache and fallback instruction\n"
+        "10. 2026-03-20 — Add data_gap category to report_learning for missing data reporting\n"
     )
 
     @mcp.tool(
