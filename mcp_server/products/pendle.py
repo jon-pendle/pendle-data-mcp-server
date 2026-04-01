@@ -172,11 +172,11 @@ lp_base_apy uses amm_tvl as weight instead of overall_tvl.
 #### AIM Emission Breakdown — flow metrics (cross-day: SUM)
 | Column | Description | Unit |
 |--------|-------------|------|
-| aim_daily_fee | AIM emission: fee component | USD |
-| aim_daily_tvl | AIM emission: TVL component | USD |
-| aim_daily_discretionary | AIM emission: discretionary component | USD |
+| aim_daily_fee | AIM emission: fee component | tokens |
+| aim_daily_tvl | AIM emission: TVL component | tokens |
+| aim_daily_discretionary | AIM emission: discretionary component | tokens |
 
-⚠️ Available from 2026-01-29+ (sPENDLE era only). Expected: aim_daily_fee + aim_daily_tvl + aim_daily_discretionary ≈ pendle_emission_value.
+⚠️ Available from 2026-01-29+ (sPENDLE era only). Expected: aim_daily_fee + aim_daily_tvl + aim_daily_discretionary ≈ pendle_emission_amount.
 
 #### Campaign Incentives — flow metrics (cross-day: SUM)
 | Column | Description | Unit |
