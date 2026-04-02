@@ -429,52 +429,65 @@ LIMIT 20
 """
 
 _USER_STATS_PER_POOL = """\
-## `pendle-data.sentio_dump.user_stats_per_pool_daily_v2`
+## `pendle-data.sentio_dump.user_stats_per_pool_daily_v1`
 
-Per-user daily trading stats by pool with cohort attributes.
+Per-user daily trading stats by pool with profile-based user attributes.
 Grain: one row per (user_address, pool, chain_id, ds). Partition: `ds` (DATE).
 
 ### Key Columns
 
-#### Identity & Cohort
+#### Identity & Profile
 - `user_address`, `pool`, `chain_id`, `ds`
-- `yield_source`, `base_asset`, `underlying_issuer`
-- `first_txn_date` / `first_txn_ts`: user's first ever transaction
-- `days_since_first_txn`: tenure in days
-- `first_pool`, `first_chain_id`, `first_action_type`, `first_event_type`
-- `first_txn_value_usd`, `first_txn_notional_trading_volume`
-- `first_pool_yield_source`, `first_pool_base_asset`, `first_pool_underlying_issuer`
+- `narrative_type`: market narrative classification
+- `wallet_type`: wallet classification
+- `prof_is_new_user`: whether user is new
+- `prof_first_active_dt`, `prof_lp_first_active_dt`, `prof_pt_first_active_dt`, `prof_yt_first_active_dt`: first active dates (overall and by token type)
+- `prof_active_pools_cnt`, `prof_active_lp_pools_cnt`, `prof_active_pt_pools_cnt`, `prof_active_yt_pools_cnt`: active pool counts
+- `prof_is_lrt_active`, `prof_is_lsd_active`, `prof_is_rwa_active`, `prof_is_point_active`: category activity flags
+- `prof_lp_whale`, `prof_pt_whale`, `prof_yt_whale`: whale flags
 
-#### Daily Trading Activity (flow → SUM)
-- `value_usd`: total USD value of transactions on this pool on this date
-- `notional_trading_volume`: total notional volume
-- `notional_trading_volume_limit`: limit order volume
-- `total_swap_fee_usd`: explicit swap fees
-- `total_limit_swap_fee_usd`: limit order fees
-- `total_implicit_swap_fee_usd`: implicit fees
-- `txn_ct`: transaction count
+#### Liquidity Add (flow → SUM)
+- `liquidity_add_amount`, `liquidity_add_market_value_usd`, `liquidity_add_notional_value_usd`
+- `liquidity_add_total_swap_fee_usd`, `liquidity_add_total_implicit_swap_fee_usd`
+- `liquidity_add_tx_cnt`
 
-#### Cross-Chain First Active Dates
-- `eth_first_active_ds`, `arb_first_active_ds`, `op_first_active_ds`,
-  `bsc_first_active_ds`, `mantle_first_active_ds`, `base_first_active_ds`,
-  `sonic_first_active_ds`, `bera_first_active_ds`, `hyperevm_first_active_ds`,
-  `plasma_first_active_ds`
+#### Liquidity Remove (flow → SUM)
+- `liquidity_remove_amount`, `liquidity_remove_market_value_usd`, `liquidity_remove_notional_value_usd`
+- `liquidity_remove_total_swap_fee_usd`, `liquidity_remove_total_implicit_swap_fee_usd`
+- `liquidity_remove_tx_cnt`
 
-#### Wallet & Money Market
-- `wallet_agents_sorted`, `first_agent`: wallet agent associations
-- `syrup_first_use_date`, `morpho_first_use_date`, `euler_first_use_date`,
-  `dolomite_first_use_date`, `gearbox_first_use_date`, `zerolend_first_use_date`,
-  `avalon_first_use_date`: first PT collateral use per lending protocol
+#### Swap PT Buy/Sell (flow → SUM)
+- `swap_pt_buy_amount`, `swap_pt_buy_market_value_usd`, `swap_pt_buy_notional_value_usd`
+- `swap_pt_buy_total_swap_fee_usd`, `swap_pt_buy_total_implicit_swap_fee_usd`, `swap_pt_buy_tx_cnt`
+- `swap_pt_sell_amount`, `swap_pt_sell_market_value_usd`, `swap_pt_sell_notional_value_usd`
+- `swap_pt_sell_total_swap_fee_usd`, `swap_pt_sell_total_implicit_swap_fee_usd`, `swap_pt_sell_tx_cnt`
+
+#### Swap YT Buy/Sell (flow → SUM)
+- `swap_yt_buy_amount`, `swap_yt_buy_market_value_usd`, `swap_yt_buy_notional_value_usd`
+- `swap_yt_buy_total_swap_fee_usd`, `swap_yt_buy_total_implicit_swap_fee_usd`, `swap_yt_buy_tx_cnt`
+- `swap_yt_sell_amount`, `swap_yt_sell_market_value_usd`, `swap_yt_sell_notional_value_usd`
+- `swap_yt_sell_total_swap_fee_usd`, `swap_yt_sell_total_implicit_swap_fee_usd`, `swap_yt_sell_tx_cnt`
+
+#### Redeem & Mint PY (flow → SUM)
+- `redeem_py_amount`, `redeem_py_market_value_usd`, `redeem_py_notional_value_usd`, `redeem_py_tx_cnt`
+- `mint_py_amount`, `mint_py_market_value_usd`, `mint_py_notional_value_usd`, `mint_py_tx_cnt`
+
+#### Profile Trading Volume
+- `prof_lp_market_trading_volume`, `prof_lp_notional_trading_volume`
+- `prof_swap_market_trading_volume`, `prof_swap_notional_trading_volume`
 
 ### SQL Example
 ```sql
--- New users this week and their first action
-SELECT user_address, first_txn_date, first_pool, first_action_type,
-  first_txn_value_usd, first_pool_base_asset
-FROM `pendle-data.sentio_dump.user_stats_per_pool_daily_v2`
-WHERE ds = DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
-  AND first_txn_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
-ORDER BY first_txn_date DESC
+-- Top whale LP providers this week
+SELECT user_address, pool, chain_id,
+  SUM(liquidity_add_market_value_usd) AS total_lp_added_usd,
+  MAX(prof_lp_whale) AS is_whale
+FROM `pendle-data.sentio_dump.user_stats_per_pool_daily_v1`
+WHERE ds >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+GROUP BY 1, 2, 3
+HAVING is_whale = TRUE
+ORDER BY total_lp_added_usd DESC
+LIMIT 20
 ```
 """
 
@@ -816,15 +829,15 @@ SPEC = ProductSpec(
             catalog=_USER_TVL_DAILY,
         ),
         TableSpec(
-            "pendle-data.sentio_dump.user_stats_per_pool_daily_v2",
+            "pendle-data.sentio_dump.user_stats_per_pool_daily_v1",
             partition_col="ds",
             description=(
-                "Per-user daily trading stats by pool with cohort attributes.\n"
+                "Per-user daily trading stats by pool with profile-based attributes.\n"
                 "Grain: (user_address, pool, chain_id, ds).\n"
-                "Key metrics: value_usd, notional_trading_volume, swap fees, txn_ct, "
-                "first_txn_date, days_since_first_txn, cross-chain first active dates, "
-                "money market first use dates.\n"
-                "→ Use for: user trading activity, cohort analysis, new user tracking, retention."
+                "Key metrics: liquidity add/remove, swap PT/YT buy/sell, mint/redeem PY "
+                "(amount, market_value_usd, notional_value_usd, fees, tx_cnt), "
+                "whale flags, narrative_type, wallet_type, profile trading volumes.\n"
+                "→ Use for: user trading activity, whale tracking, category analysis."
             ),
             catalog=_USER_STATS_PER_POOL,
         ),
@@ -882,7 +895,7 @@ SPEC = ProductSpec(
         "For Boros margin trading data, use get_boros_table_detail instead.\n\n"
         "Available tables: pool_metrics_all_in_one_daily, market_meta, price_feeds, "
         "pool_metrics_lifetime, user_pool_tvl_daily, user_tvl_daily, "
-        "user_stats_per_pool_daily_v2, pt_collateral_daily_balance, "
+        "user_stats_per_pool_daily_v1, pt_collateral_daily_balance, "
         "mm_user_collateral_daily_balance, limit_order_ob_depth_hourly."
     ),
     register_extra_tools=_register_pendle_tools,
