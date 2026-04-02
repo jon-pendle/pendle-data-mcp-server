@@ -107,6 +107,7 @@ Three JOINs link frontend events to on-chain data:
 - `onchain_notional_trading_volume`: notional volume
 - `onchain_total_swap_fee_usd`, `onchain_total_implicit_swap_fee_usd`, `onchain_total_limit_swap_fee_usd`
 - `filled_limit_order_notional_volume`: limit order fill amount
+- `properties`: raw Mixpanel event JSON payload for ad-hoc field access
 
 ### SQL Example
 ```sql
@@ -179,6 +180,7 @@ Only Boros events (app = 'boros'). ~4K rows/day.
 - `referral_code`: referral attribution
 - `tx_hash`: only from boros_trading_rewards_claimed
 - `rewards_accrued`: reward amount claimed
+- `properties`: raw Mixpanel event JSON payload for ad-hoc field access
 
 ## Boros Event Types (event_name values)
 
