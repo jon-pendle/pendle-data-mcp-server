@@ -458,10 +458,17 @@ Built on top of `user_market_metric_all_in_one_daily` with additional:
 #### PnL (combined)
 - `total_pnl` / `_usd`: realized_trading + realized_settlement + unrealized
 
-#### Incentives
+#### Incentives (USD — flow → SUM)
 - `daily_amm_lp_rewards_usd`, `cumulative_amm_lp_rewards_usd`
 - `daily_maker_incentive_usd`, `cumulative_maker_incentive_usd`
 - `daily_total_incentives_usd`, `cumulative_total_incentives_usd`
+
+#### Incentives (token amount — flow → SUM)
+- `daily_amm_lp_rewards_token_amount`, `cumulative_amm_lp_rewards_token_amount`
+- `daily_maker_incentive_token_amount`, `cumulative_maker_incentive_token_amount`
+- `daily_total_incentives_token_amount`, `cumulative_total_incentives_token_amount`
+
+Token amounts are raw ERC20 units (already divided by 1e18). Use for tracking PENDLE token distributions independent of price.
 
 ### SQL Example
 ```sql
