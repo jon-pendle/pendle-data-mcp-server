@@ -434,6 +434,10 @@ _USER_STATS_PER_POOL = """\
 Per-user daily trading stats by pool with profile-based user attributes.
 Grain: one row per (user_address, pool, chain_id, ds). Partition: `ds` (DATE).
 
+⚠️ **v1 vs v2**: Both tables are active and cover the same grain. Choose by use-case:
+- **v1**: granular per-action-type metrics (swap_pt_buy_*, liquidity_add_*, etc.), whale flags, narrative_type. Best for action-type breakdown.
+- **v2**: aggregated value_usd/notional_trading_volume, first-action cohort attributes, cross-chain first active dates, money market first use. Best for cohort analysis and retention.
+
 ### Key Columns
 
 #### Identity & Profile
@@ -488,6 +492,60 @@ GROUP BY 1, 2, 3
 HAVING is_whale = TRUE
 ORDER BY total_lp_added_usd DESC
 LIMIT 20
+```
+"""
+
+_USER_STATS_PER_POOL_V2 = """\
+## `pendle-data.sentio_dump.user_stats_per_pool_daily_v2`
+
+Per-user daily trading stats by pool with cohort/first-action enrichment.
+Grain: one row per (user_address, pool, chain_id, ds). Partition: `ds` (DATE).
+
+⚠️ **v1 vs v2**: Both tables are active and cover the same grain. Choose by use-case:
+- **v1**: granular per-action-type metrics (swap_pt_buy_*, liquidity_add_*, etc.), whale flags, narrative_type. Best for action-type breakdown.
+- **v2**: aggregated value_usd/notional_trading_volume, first-action cohort attributes, cross-chain first active dates, money market first use. Best for cohort analysis and retention.
+
+### Key Columns
+
+#### Identity & Cohort
+- `user_address`, `pool`, `chain_id`, `ds`
+- `yield_source`, `base_asset`, `underlying_issuer`
+- `first_txn_date` / `first_txn_ts`: user's first ever transaction
+- `days_since_first_txn`: tenure in days
+- `first_pool`, `first_chain_id`, `first_action_type`, `first_event_type`
+- `first_txn_value_usd`, `first_txn_notional_trading_volume`
+- `first_pool_yield_source`, `first_pool_base_asset`, `first_pool_underlying_issuer`
+
+#### Daily Trading Activity (flow → SUM)
+- `value_usd`: total USD value of transactions on this pool on this date
+- `notional_trading_volume`: total notional volume
+- `notional_trading_volume_limit`: limit order volume
+- `total_swap_fee_usd`: explicit swap fees
+- `total_limit_swap_fee_usd`: limit order fees
+- `total_implicit_swap_fee_usd`: implicit fees
+- `txn_ct`: transaction count
+
+#### Cross-Chain First Active Dates
+- `eth_first_active_ds`, `arb_first_active_ds`, `op_first_active_ds`,
+  `bsc_first_active_ds`, `mantle_first_active_ds`, `base_first_active_ds`,
+  `sonic_first_active_ds`, `bera_first_active_ds`, `hyperevm_first_active_ds`,
+  `plasma_first_active_ds`
+
+#### Wallet & Money Market
+- `wallet_agents_sorted`, `first_agent`: wallet agent associations
+- `syrup_first_use_date`, `morpho_first_use_date`, `euler_first_use_date`,
+  `dolomite_first_use_date`, `gearbox_first_use_date`, `zerolend_first_use_date`,
+  `avalon_first_use_date`: first PT collateral use per lending protocol
+
+### SQL Example
+```sql
+-- New users this week and their first action
+SELECT user_address, first_txn_date, first_pool, first_action_type,
+  first_txn_value_usd, first_pool_base_asset
+FROM `pendle-data.sentio_dump.user_stats_per_pool_daily_v2`
+WHERE ds = DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
+  AND first_txn_date >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+ORDER BY first_txn_date DESC
 ```
 """
 
@@ -837,9 +895,24 @@ SPEC = ProductSpec(
                 "Key metrics: liquidity add/remove, swap PT/YT buy/sell, mint/redeem PY "
                 "(amount, market_value_usd, notional_value_usd, fees, tx_cnt), "
                 "whale flags, narrative_type, wallet_type, profile trading volumes.\n"
-                "→ Use for: user trading activity, whale tracking, category analysis."
+                "→ Use for: user trading activity, whale tracking, category analysis.\n"
+                "⚠️ For cohort/first-action analysis and retention, use v2 instead."
             ),
             catalog=_USER_STATS_PER_POOL,
+        ),
+        TableSpec(
+            "pendle-data.sentio_dump.user_stats_per_pool_daily_v2",
+            partition_col="ds",
+            description=(
+                "Per-user daily trading stats by pool with cohort/first-action enrichment.\n"
+                "Grain: (user_address, pool, chain_id, ds).\n"
+                "Key metrics: value_usd, notional_trading_volume, swap fees, txn_ct, "
+                "first_txn_date, days_since_first_txn, cross-chain first active dates, "
+                "money market first use dates.\n"
+                "→ Use for: cohort analysis, new user tracking, retention, cross-chain behavior.\n"
+                "⚠️ For per-action-type breakdown (PT buy/sell, LP add/remove), use v1 instead."
+            ),
+            catalog=_USER_STATS_PER_POOL_V2,
         ),
         # ── PT Collateral tables ──────────────────────────────────────
         TableSpec(
@@ -895,7 +968,8 @@ SPEC = ProductSpec(
         "For Boros margin trading data, use get_boros_table_detail instead.\n\n"
         "Available tables: pool_metrics_all_in_one_daily, market_meta, price_feeds, "
         "pool_metrics_lifetime, user_pool_tvl_daily, user_tvl_daily, "
-        "user_stats_per_pool_daily_v1, pt_collateral_daily_balance, "
+        "user_stats_per_pool_daily_v1, user_stats_per_pool_daily_v2, "
+        "pt_collateral_daily_balance, "
         "mm_user_collateral_daily_balance, limit_order_ob_depth_hourly."
     ),
     register_extra_tools=_register_pendle_tools,
