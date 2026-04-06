@@ -549,6 +549,46 @@ ORDER BY first_txn_date DESC
 ```
 """
 
+_CROSS_CHAIN_SWAP_INTENTS = """\
+## `pendle-data.analytics.cross_chain_swap_intents_curated`
+
+Cross-chain PT swap volume with bridge attribution.
+Grain: one row per completed swap intent (`intent_id`). Not partitioned (full table rebuild).
+
+### Key Columns
+| Column | Type | Description |
+|--------|------|-------------|
+| date | DATE | Swap date |
+| intent_id | STRING | Unique intent identifier |
+| user_address | STRING | Wallet that initiated the swap |
+| swap_tx_hash | STRING | On-chain transaction hash |
+| action_type | STRING | `BUY_PT` or `SELL_PT` |
+| bridge | STRING | Bridge used: `LayerZero` or `Bungee` |
+| from_chain_id | INT64 | Source chain |
+| to_chain_id | INT64 | Destination chain |
+| hub_chain_id | INT64 | Hub chain where PT lives |
+| hub_chain_pt | STRING | PT contract address on hub chain |
+| token_in | STRING | Input token address |
+| token_out | STRING | Output token address |
+| pt_amount | FLOAT64 | PT amount (18-decimal adjusted) |
+| volume_usd | FLOAT64 | USD volume (PT amount × PT price) |
+
+### Notes
+- Bridge logic: LayerZero when source/dest ≠ hub chain for SELL_PT/BUY_PT respectively; Bungee for the reverse leg.
+
+### SQL Example
+```sql
+-- Daily cross-chain swap volume by bridge (last 30 days)
+SELECT date, bridge, action_type,
+  COUNT(*) AS swaps,
+  ROUND(SUM(volume_usd), 2) AS total_volume_usd
+FROM `pendle-data.analytics.cross_chain_swap_intents_curated`
+WHERE date >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
+GROUP BY 1, 2, 3
+ORDER BY 1 DESC, 4 DESC
+```
+"""
+
 _PT_COLLATERAL_DAILY = """\
 ## `pendle-data.analytics.pt_collateral_daily_balance`
 
@@ -914,6 +954,18 @@ SPEC = ProductSpec(
             ),
             catalog=_USER_STATS_PER_POOL_V2,
         ),
+        # ── Cross-chain swap intents ─────────────────────────────────
+        TableSpec(
+            "pendle-data.analytics.cross_chain_swap_intents_curated",
+            partition_col=None,
+            description=(
+                "Cross-chain PT swap volume with bridge attribution.\n"
+                "Grain: one row per completed intent (intent_id).\n"
+                "Key metrics: volume_usd, pt_amount, bridge (LayerZero/Bungee), action_type.\n"
+                "→ Use for: cross-chain swap volume, bridge comparison, user cross-chain activity."
+            ),
+            catalog=_CROSS_CHAIN_SWAP_INTENTS,
+        ),
         # ── PT Collateral tables ──────────────────────────────────────
         TableSpec(
             "pendle-data.analytics.pt_collateral_daily_balance",
@@ -969,7 +1021,7 @@ SPEC = ProductSpec(
         "Available tables: pool_metrics_all_in_one_daily, market_meta, price_feeds, "
         "pool_metrics_lifetime, user_pool_tvl_daily, user_tvl_daily, "
         "user_stats_per_pool_daily_v1, user_stats_per_pool_daily_v2, "
-        "pt_collateral_daily_balance, "
+        "cross_chain_swap_intents_curated, pt_collateral_daily_balance, "
         "mm_user_collateral_daily_balance, limit_order_ob_depth_hourly."
     ),
     register_extra_tools=_register_pendle_tools,
