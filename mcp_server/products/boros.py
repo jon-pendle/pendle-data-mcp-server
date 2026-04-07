@@ -149,28 +149,66 @@ Join to market metadata: `m.market_id = mm.id AND m.data_source = mm.data_source
 - `user_count`, `user_has_swap_fee_count`
 - WARNING: NOT additive across markets. Never `SUM` user counts across different markets.
 
+#### Market Status / Anomalies
+Status codes (per minute, from `market_snapshots_1m.status`): `0` = paused, `1` = CLO (close-only), `2` = normal.
+
+- `had_anomaly_today` (BOOL): True if the market had any non-normal status (status ≠ 2) at any minute of the day. **Use this first** as a cheap filter to find days/markets worth investigating.
+- `paused_minutes` (INT64, flow → SUM): Number of minutes the market was paused (status=0).
+- `clo_minutes` (INT64, flow → SUM): Number of minutes the market was in close-only state (status=1).
+- `status_changes` (ARRAY<STRUCT>): Event log of every status transition during the day, ordered by time. Each element: `{changed_at TIMESTAMP, from_status INT, to_status INT, mark_apr FLOAT64}`. Only populated when transitions actually occurred. Use this for forensic analysis after `had_anomaly_today` flags a problem.
+
+**Default behavior**: ALWAYS include `had_anomaly_today` in `SELECT` (or `COUNTIF(had_anomaly_today)` when aggregating across markets) when querying any metric from this table, so the caller can immediately see whether the day's metrics may be distorted by paused/CLO periods. Treat it like a data-quality flag — it costs nothing to surface.
+
+**Drill-down workflow** (when `had_anomaly_today` flags a problem): use `paused_minutes` / `clo_minutes` for severity, then `UNNEST(status_changes)` for the exact transition timeline.
+
 ### SQL Examples
 ```sql
 -- Daily protocol-level metrics (all markets aggregated)
+-- Always SELECT had_anomaly_today-derived flag so the caller can see whether any market
+-- was paused/CLO that day (which can distort aggregated metrics).
 SELECT dt,
   SUM(notional_value_in_usd) / 2 AS trading_volume_usd,
   SUM(swap_fees_in_usd) AS swap_fees_usd,
   SUM(settlement_fees_in_usd) AS settlement_fees_usd,
-  SUM(notional_oi_in_usd) / 2 AS open_interest_usd
+  SUM(notional_oi_in_usd) / 2 AS open_interest_usd,
+  COUNTIF(had_anomaly_today) AS markets_with_anomaly
 FROM `pendle-data.boros_analytics.market_metrics_all_in_one_daily`
 WHERE dt >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
   AND data_source = 'production'
 GROUP BY dt ORDER BY dt
 
 -- Per-market APR and OI snapshot (latest day)
+-- Always include `had_anomaly_today` so the caller knows if mark_apr / floating_apr
+-- may be unreliable (market was paused or in close-only state at some point that day).
 SELECT m.market_id, mm.name AS market_name, mm.platform_name,
-  m.mark_apr, m.floating_apr, m.notional_oi_in_usd / 2 AS oi_usd, m.amm_tvl_usd
+  m.mark_apr, m.floating_apr, m.notional_oi_in_usd / 2 AS oi_usd, m.amm_tvl_usd,
+  m.had_anomaly_today
 FROM `pendle-data.boros_analytics.market_metrics_all_in_one_daily` m
 JOIN `pendle-data.boros_analytics.market_meta` mm
   ON m.market_id = mm.id AND m.data_source = mm.data_source
 WHERE m.dt = DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)
   AND m.data_source = 'production'
 ORDER BY oi_usd DESC
+
+-- Find anomalous (market, day) pairs in the last 30 days, then drill into severity
+SELECT m.dt, m.market_id, mm.name AS market_name,
+  m.paused_minutes, m.clo_minutes
+FROM `pendle-data.boros_analytics.market_metrics_all_in_one_daily` m
+JOIN `pendle-data.boros_analytics.market_meta` mm
+  ON m.market_id = mm.id AND m.data_source = mm.data_source
+WHERE m.dt >= DATE_SUB(CURRENT_DATE(), INTERVAL 30 DAY)
+  AND m.data_source = 'production'
+  AND m.had_anomaly_today  -- cheap filter first
+ORDER BY (m.paused_minutes + m.clo_minutes) DESC
+
+-- Forensic timeline of status transitions for a specific market/day
+SELECT m.dt, m.market_id, sc.changed_at, sc.from_status, sc.to_status, sc.mark_apr
+FROM `pendle-data.boros_analytics.market_metrics_all_in_one_daily` m,
+  UNNEST(m.status_changes) AS sc
+WHERE m.dt = DATE '2026-04-06'
+  AND m.market_id = 42
+  AND m.data_source = 'production'
+ORDER BY sc.changed_at
 ```
 """
 
