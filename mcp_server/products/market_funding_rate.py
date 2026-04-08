@@ -67,6 +67,11 @@ plus all Hyperliquid pairs.
 - `dt`: settlement timestamp (TIMESTAMP)
 - `funding_rate`: raw rate per settlement period
 - `normalized_funding_rate`: per-hour rate = `funding_rate / funding_rate_interval`
+- `price`: daily open price of the underlying in USD (LEFT JOIN — may be NULL).
+  Sourced from `hyperliquid.price_ohlcv_daily.open_price` for Hyperliquid pairs,
+  and `coinglass.price_ohlc.open` (`price_type = 'futures'`) for other exchanges.
+  Note: this is a **daily** open price joined onto every intraday `dt` row, so
+  all rows on the same date share the same price value.
 
 ### Use For
 - Latest / recent funding rates for a specific pair
