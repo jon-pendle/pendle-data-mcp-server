@@ -414,6 +414,11 @@ Join to market metadata: `m.market_id = mm.id AND m.data_source = mm.data_source
 - `realized_trading_pnl_cum_net` / `_in_usd`: cumulative trading PnL
 - `unrealized_pnl` / `_in_usd`: mark-to-market unrealized PnL
 
+#### Incentives (flow → SUM)
+- `amm_lp_rewards_usd` / `amm_lp_rewards_token_amount`: daily AMM LP reward incentives
+- `maker_incentive_usd` / `maker_incentive_token_amount`: daily maker incentives
+- `total_incentives_usd` / `total_incentives_token_amount`: daily total incentives (amm_lp + maker)
+
 ### Aggregation Rules
 - Volume/fees: SUM across days, SUM across users.
 - Position/PnL: snapshot — use latest day or AVG.

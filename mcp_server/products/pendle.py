@@ -178,6 +178,14 @@ lp_base_apy uses amm_tvl as weight instead of overall_tvl.
 
 ⚠️ Available from 2026-01-29+ (sPENDLE era only). Expected: aim_daily_fee + aim_daily_tvl + aim_daily_discretionary ≈ pendle_emission_amount.
 
+#### Limit Order Incentives — flow metrics (cross-day: SUM)
+| Column | Description | Unit |
+|--------|-------------|------|
+| limit_order_allocated_incentive_amount | Daily allocated LO incentives (from config amount_per_sec) | tokens |
+| limit_order_consumed_incentive_amount | Daily consumed LO incentives (actual distributions) | tokens |
+| limit_order_incentive_min_apy | Lower bound of incentivized APY range | rate |
+| limit_order_incentive_max_apy | Upper bound of incentivized APY range | rate |
+
 #### Campaign Incentives — flow metrics (cross-day: SUM)
 | Column | Description | Unit |
 |--------|-------------|------|
