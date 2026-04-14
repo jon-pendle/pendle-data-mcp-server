@@ -690,6 +690,63 @@ LIMIT 10
 ```
 """
 
+_PENDLE_INCOMES_EACH_EPOCH = """\
+## `pendle-data.analytics.pendle_incomes_all_in_one_each_epoch`
+
+Per-epoch (Thursday-to-Wednesday weekly cycle) Pendle protocol income aggregates.
+Grain: one row per epoch (`epoch_start_date`). Not partitioned (full rebuild).
+
+Aggregates `pendle_incomes_all_in_one_daily` to weekly epochs (week starts Thursday),
+joined with realized yield fees, liquid-locker bribes, vePENDLE distributions,
+and sPENDLE buyback/airdrop data.
+
+### Key Columns
+| Column | Type | Description |
+|--------|------|-------------|
+| epoch_start_date | DATE | Epoch start (Thursday) — unique key |
+| epoch_end_date | DATE | Epoch end (Wednesday, epoch_start_date + 6 days) |
+| pendle_emission_amount | FLOAT64 | Total PENDLE tokens emitted in epoch |
+| pendle_emission_value | FLOAT64 | USD value of PENDLE emissions |
+| explicit_swap_fees | FLOAT64 | Explicit swap fees in USD (AMM + limit) |
+| explicit_amm_swap_fees | FLOAT64 | Explicit AMM swap fees in USD |
+| explicit_limit_swap_fees | FLOAT64 | Explicit limit-order swap fees in USD |
+| implicit_swap_fees | FLOAT64 | Implicit swap fees in USD |
+| expected_yield_fees | FLOAT64 | Expected yield fees from non-expired pools |
+| expected_expired_yield | FLOAT64 | Expected yield from pools that expired in epoch |
+| realized_yield_fees_from_dune_data | FLOAT64 | Realized YT fees from Dune-sourced data |
+| explicit_amm_swap_fees_from_dune_data | FLOAT64 | AMM swap fees (Dune-sourced) |
+| explicit_limit_swap_fees_from_dune_data | FLOAT64 | Limit swap fees (Dune-sourced) |
+| campaign_incentive | FLOAT64 | Total Merkle campaign incentives in USD |
+| co_bribe_campaign_incentive | FLOAT64 | Co-bribe portion of campaign incentives |
+| lp_holder_campaign_incentive | FLOAT64 | Incentives to LP holders |
+| yt_holder_campaign_incentive | FLOAT64 | Incentives to YT holders |
+| lp_yt_holder_campaign_incentive | FLOAT64 | Incentives to LP+YT holders |
+| epoch_realized_yield_fees | FLOAT64 | Realized yield fees in USD (from realized_yield_fee_weekly) |
+| epoch_eqb_bribe | FLOAT64 | Equilibria bribe USD value |
+| epoch_penpie_bribe | FLOAT64 | Penpie bribe USD value |
+| vependle_monthly_rewards_distributed_in_usd | FLOAT64 | vePENDLE rewards distributed (only set in distribution epochs — implicit distribution flag) |
+| vependle_monthly_airdrop_distributed_in_usd | FLOAT64 | vePENDLE airdrop distributed in epoch |
+| epoch_spendle_airdrop_in_usd | FLOAT64 | sPENDLE airdrop USD value |
+| epoch_spendle_buyback_in_usd | FLOAT64 | sPENDLE buyback USD value (buyback_amount × PENDLE price) |
+
+### Notes
+- Epoch = week starting Thursday 00:00 UTC (Pendle's vote epoch convention).
+- vePENDLE fields are recorded only in distribution epochs — non-null acts as an implicit "distribution happened" flag.
+- For daily granularity use `pendle_incomes_all_in_one_daily` (same metrics, daily grain).
+
+### SQL Example
+```sql
+-- Last 12 epochs of Pendle revenue breakdown
+SELECT epoch_start_date,
+  ROUND(explicit_swap_fees + implicit_swap_fees + epoch_realized_yield_fees, 2) AS pendle_revenue_usd,
+  ROUND(pendle_emission_value, 2) AS emissions_usd,
+  ROUND(campaign_incentive, 2) AS incentives_usd
+FROM `pendle-data.analytics.pendle_incomes_all_in_one_each_epoch`
+ORDER BY epoch_start_date DESC
+LIMIT 12
+```
+"""
+
 _LIMIT_ORDER_OB_DEPTH = """\
 ## `pendle-data.pendle_api.limit_order_ob_depth_hourly`
 
@@ -1000,6 +1057,20 @@ SPEC = ProductSpec(
             ),
             catalog=_MM_USER_COLLATERAL_DAILY,
         ),
+        # ── Pendle protocol-level incomes (epoch grain) ──────────────────
+        TableSpec(
+            "pendle-data.analytics.pendle_incomes_all_in_one_each_epoch",
+            partition_col=None,
+            description=(
+                "Per-epoch (Thursday weekly) Pendle protocol income aggregates.\n"
+                "Grain: one row per epoch_start_date.\n"
+                "Key metrics: emissions, swap fees (explicit/implicit/AMM/limit), "
+                "yield fees (expected/realized), campaign incentives, LL bribes "
+                "(eqb/penpie), vePENDLE distributions, sPENDLE buyback/airdrop.\n"
+                "→ Use for: weekly/epoch-level Pendle revenue, emissions, incentive analysis."
+            ),
+            catalog=_PENDLE_INCOMES_EACH_EPOCH,
+        ),
         # ── Limit order orderbook depth ──────────────────────────────────
         TableSpec(
             "pendle-data.pendle_api.limit_order_ob_depth_hourly",
@@ -1030,7 +1101,8 @@ SPEC = ProductSpec(
         "pool_metrics_lifetime, user_pool_tvl_daily, user_tvl_daily, "
         "user_stats_per_pool_daily_v1, user_stats_per_pool_daily_v2, "
         "cross_chain_swap_intents_curated, pt_collateral_daily_balance, "
-        "mm_user_collateral_daily_balance, limit_order_ob_depth_hourly."
+        "mm_user_collateral_daily_balance, pendle_incomes_all_in_one_each_epoch, "
+        "limit_order_ob_depth_hourly."
     ),
     register_extra_tools=_register_pendle_tools,
 )
