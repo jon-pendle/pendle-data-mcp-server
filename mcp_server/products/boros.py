@@ -397,12 +397,21 @@ Join to market metadata: `m.market_id = mm.id AND m.data_source = mm.data_source
 - `total_rebate` / `_in_usd`: sum of settlement + taker + OTC rebates
 
 #### Trading (flow → SUM)
+Volume and fee columns are sourced from `user_stats_per_market_daily` (event-level
+aggregation from `user_activity_all`), so values align with that table exactly.
 - `daily_notional_vol` / `_in_usd`: daily notional volume (two-sided)
 - `daily_vol` / `_in_usd`: daily trade value
 - `daily_swap_fees` / `_in_usd`: daily total swap fees
 - `daily_limit_order_swap_fees` / `_in_usd`
 - `daily_amm_otc_fees` / `_in_usd`
 - `daily_all_otc_fees` / `_in_usd`
+
+#### Taker / Maker volume split (USD, flow → SUM)
+- `taker_trade_notional_size_in_usd`: taker-side notional volume
+- `taker_trade_value_in_usd`: taker-side trade value
+- `maker_trade_notional_size_in_usd`: maker-side notional volume
+- `maker_trade_value_in_usd`: maker-side trade value
+- Taker + Maker = total (`daily_notional_vol_in_usd` / `daily_vol_in_usd`)
 
 #### Position (snapshot)
 - `notional_size` / `_usd`: end-of-day net position (signed)

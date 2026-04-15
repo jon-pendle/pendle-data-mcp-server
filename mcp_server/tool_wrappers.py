@@ -403,16 +403,16 @@ def register_tools(mcp: FastMCP):
     _CHANGELOG = (
         "# MCP Server Changelog (last 10 updates)\n"
         "\n"
-        "1. 2026-04-14 — Sync pipeline: add pendle_incomes_all_in_one_each_epoch table to pendle catalog\n"
-        "2. 2026-04-10 — Sync pipeline: add incentive columns to boros user_market_metric and pendle pool_metrics\n"
-        "3. 2026-04-08 — Sync pipeline: add price column to coinglass market_funding_rate\n"
-        "4. 2026-04-07 — Sync pipeline: add market status/anomaly columns to boros market_metrics_all_in_one_daily\n"
-        "5. 2026-04-06 — Sync pipeline: add cross_chain_swap_intents_curated table to pendle catalog\n"
-        "6. 2026-04-03 — Sync pipeline: add incentive token amount columns to user_eod_position_summary\n"
-        "7. 2026-04-03 — Keep both user_stats_per_pool_daily v1 and v2 with use-case guidance\n"
-        "8. 2026-04-02 — Sync pipeline: add properties column to frontend_tracking catalogs\n"
-        "9. 2026-04-02 — Add user_stats_per_pool_daily_v1 catalog with per-action-type metrics\n"
-        "10. 2026-03-31 — Add twitter_engagement product (tweet_engagement_delta_hourly, tweet_basic_infos_latest_hourly)\n"
+        "1. 2026-04-15 — Sync pipeline: add taker/maker USD volume splits to boros user_market_metric_all_in_one_daily\n"
+        "2. 2026-04-14 — Sync pipeline: add pendle_incomes_all_in_one_each_epoch table to pendle catalog\n"
+        "3. 2026-04-10 — Sync pipeline: add incentive columns to boros user_market_metric and pendle pool_metrics\n"
+        "4. 2026-04-08 — Sync pipeline: add price column to coinglass market_funding_rate\n"
+        "5. 2026-04-07 — Sync pipeline: add market status/anomaly columns to boros market_metrics_all_in_one_daily\n"
+        "6. 2026-04-06 — Sync pipeline: add cross_chain_swap_intents_curated table to pendle catalog\n"
+        "7. 2026-04-03 — Sync pipeline: add incentive token amount columns to user_eod_position_summary\n"
+        "8. 2026-04-03 — Keep both user_stats_per_pool_daily v1 and v2 with use-case guidance\n"
+        "9. 2026-04-02 — Sync pipeline: add properties column to frontend_tracking catalogs\n"
+        "10. 2026-04-02 — Add user_stats_per_pool_daily_v1 catalog with per-action-type metrics\n"
     )
 
     @mcp.tool(
