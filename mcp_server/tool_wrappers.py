@@ -188,6 +188,7 @@ def register_tools(mcp: FastMCP):
         bytes_mb = 0.0
         returned_rows = 0
         error_type = None
+        error_message = None
         result = json.dumps({"error": "unexpected", "error_type": "execution"})
         try:
             result = await execute_sql(
@@ -201,8 +202,10 @@ def register_tools(mcp: FastMCP):
             bytes_mb = parsed.get("metadata", {}).get("bytes_processed_mb", 0.0)
             returned_rows = parsed.get("metadata", {}).get("rows", 0)
             error_type = parsed.get("error_type")
+            error_message = (parsed.get("error") or "")[:500] or None
         except Exception as exc:
             error_type = "execution"
+            error_message = str(exc)[:500]
             result = json.dumps({"error": str(exc), "error_type": "execution"})
         finally:
             _track(
@@ -214,6 +217,7 @@ def register_tools(mcp: FastMCP):
                 returned_rows=returned_rows,
                 bytes_mb=bytes_mb,
                 error_type=error_type,
+                error_message=error_message,
             )
             if bytes_mb > 0:
                 await add_bytes(email, bytes_mb)
