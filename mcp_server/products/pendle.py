@@ -882,8 +882,10 @@ def _register_pendle_tools(mcp, track_fn):
     )
     async def get_pendle_pools_tool(
         is_active_only: bool = True,
-        fields: list[str] | None = None,
+        fields: list[str] | str | None = None,
     ) -> str:
+        if isinstance(fields, str):
+            fields = [f.strip() for f in fields.split(",") if f.strip()]
         track_fn("get_pendle_pools", is_active_only=is_active_only, fields=fields)
         import json as _json
         import pandas_gbq as _pgbq

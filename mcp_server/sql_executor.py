@@ -96,7 +96,7 @@ def _pre_validate(sql: str) -> str | None:
     for table_name, partition_col in PARTITION_TABLES.items():
         if table_name in stripped:
             escaped = re.escape(partition_col)
-            pattern = rf"{escaped}\s*(>=|<=|=|>|<|BETWEEN|IN)"
+            pattern = rf"{escaped}`?\s*(>=|<=|=|>|<|BETWEEN|IN)"
             if not re.search(pattern, stripped, re.IGNORECASE):
                 return (
                     f"Query references '{table_name}' but does not filter on "
