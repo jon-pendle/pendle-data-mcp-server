@@ -92,12 +92,15 @@ def _pre_validate(sql: str) -> str | None:
         if re.search(rf"\b{kw}\b", upper):
             return f"Statement type '{kw}' is not allowed. Only SELECT is permitted."
 
-    # 2. Partition filter check (text-based, runs before dry-run to give early feedback)
+    # 2. Partition filter check — partition column must be referenced somewhere.
+    # Accepts wrapped forms like DATE(col), CAST(col AS DATE), DATE_TRUNC(col, WEEK),
+    # EXTRACT(YEAR FROM col), `col`, t.col, etc. BigQuery's byte cap (enforced on
+    # dry-run via maximum_bytes_billed) catches queries that mention the col but
+    # don't actually prune partitions — this check is only for early UX feedback.
     for table_name, partition_col in PARTITION_TABLES.items():
         if table_name in stripped:
             escaped = re.escape(partition_col)
-            pattern = rf"{escaped}`?\s*(>=|<=|=|>|<|BETWEEN|IN)"
-            if not re.search(pattern, stripped, re.IGNORECASE):
+            if not re.search(rf"\b{escaped}\b", stripped, re.IGNORECASE):
                 return (
                     f"Query references '{table_name}' but does not filter on "
                     f"partition column '{partition_col}'. Add a WHERE condition on "
