@@ -100,7 +100,10 @@ def _pre_validate(sql: str) -> str | None:
     for table_name, partition_col in PARTITION_TABLES.items():
         if table_name in stripped:
             escaped = re.escape(partition_col)
-            if not re.search(rf"\b{escaped}\b", stripped, re.IGNORECASE):
+            # Use word boundaries only for plain column names; partition_col may
+            # be an expression like "DATE(hour)" where \b around parens fails.
+            pattern = rf"\b{escaped}\b" if re.fullmatch(r"\w+", partition_col) else escaped
+            if not re.search(pattern, stripped, re.IGNORECASE):
                 return (
                     f"Query references '{table_name}' but does not filter on "
                     f"partition column '{partition_col}'. Add a WHERE condition on "
