@@ -407,16 +407,16 @@ def register_tools(mcp: FastMCP):
     _CHANGELOG = (
         "# MCP Server Changelog (last 10 updates)\n"
         "\n"
-        "1. 2026-04-17 — Fix partition filter check for expression-valued partition_col (DATE(hour))\n"
-        "2. 2026-04-16 — Log BQ error message in tool_usage for run_sql failures\n"
-        "3. 2026-04-16 — Loosen partition filter check to accept wrapped partition column (DATE/CAST/EXTRACT/DATE_TRUNC)\n"
-        "4. 2026-04-16 — Accept comma-separated strings for list[str] fields params and backticked partition column\n"
-        "5. 2026-04-15 — Sync pipeline: add taker/maker USD volume splits to boros user_market_metric_all_in_one_daily\n"
-        "6. 2026-04-14 — Sync pipeline: add pendle_incomes_all_in_one_each_epoch table to pendle catalog\n"
-        "7. 2026-04-10 — Sync pipeline: add incentive columns to boros user_market_metric and pendle pool_metrics\n"
-        "8. 2026-04-08 — Sync pipeline: add price column to coinglass market_funding_rate\n"
-        "9. 2026-04-07 — Sync pipeline: add market status/anomaly columns to boros market_metrics_all_in_one_daily\n"
-        "10. 2026-04-06 — Sync pipeline: add cross_chain_swap_intents_curated table to pendle catalog\n"
+        "1. 2026-04-21 — Sync pipeline: split Boros maker_incentive into LOL (provideLiquidity) and MV (makerVolume + legacy/NULL)\n"
+        "2. 2026-04-17 — Fix partition filter check for expression-valued partition_col (DATE(hour))\n"
+        "3. 2026-04-16 — Log BQ error message in tool_usage for run_sql failures\n"
+        "4. 2026-04-16 — Loosen partition filter check to accept wrapped partition column (DATE/CAST/EXTRACT/DATE_TRUNC)\n"
+        "5. 2026-04-16 — Accept comma-separated strings for list[str] fields params and backticked partition column\n"
+        "6. 2026-04-15 — Sync pipeline: add taker/maker USD volume splits to boros user_market_metric_all_in_one_daily\n"
+        "7. 2026-04-14 — Sync pipeline: add pendle_incomes_all_in_one_each_epoch table to pendle catalog\n"
+        "8. 2026-04-10 — Sync pipeline: add incentive columns to boros user_market_metric and pendle pool_metrics\n"
+        "9. 2026-04-08 — Sync pipeline: add price column to coinglass market_funding_rate\n"
+        "10. 2026-04-07 — Sync pipeline: add market status/anomaly columns to boros market_metrics_all_in_one_daily\n"
     )
 
     @mcp.tool(
