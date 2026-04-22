@@ -1,5 +1,14 @@
 steps:
+  # 1. Initialize the boros-kb submodule into the build context.
+  #    Requires the Cloud Build trigger's GitHub App install to have read access
+  #    to both pendle-data-mcp-server and pendle-finance/boros-knowledge-base.
+  - name: 'gcr.io/cloud-builders/git'
+    id: init-submodules
+    args: ['submodule', 'update', '--init', '--recursive']
+
+  # 2. Build the container image tagged with the commit SHA.
   - name: 'gcr.io/cloud-builders/docker'
+    id: build
     args:
       - 'build'
       - '-t'
@@ -7,6 +16,32 @@ steps:
       - '-f'
       - 'Dockerfile'
       - '.'
+
+  # 3. Push image so Cloud Run can pull before the run-deploy step.
+  - name: 'gcr.io/cloud-builders/docker'
+    id: push
+    args:
+      - 'push'
+      - 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/cloud-run/pendle-mcp-server:$SHORT_SHA'
+
+  # 4. Roll out a new Cloud Run revision. Flags mirror deploy.sh.
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    id: run-deploy
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'p-data-mcp-server'
+      - '--image=asia-southeast1-docker.pkg.dev/$PROJECT_ID/cloud-run/pendle-mcp-server:$SHORT_SHA'
+      - '--region=asia-southeast1'
+      - '--platform=managed'
+      - '--allow-unauthenticated'
+      - '--memory=1024Mi'
+      - '--cpu=1'
+      - '--max-instances=3'
+      - '--service-account=p-data-mcp-server@pendle-data.iam.gserviceaccount.com'
+      - '--set-env-vars=GOOGLE_OAUTH_CLIENT_ID=756482294543-flqkea2lpkugufl15rh7tjne6mjcbif7.apps.googleusercontent.com,MCP_SERVER_BASE_URL=https://p-data-mcp-server-7vz6iynqna-as.a.run.app,QA_SERVICE_URL=https://llm-service-qa-7vz6iynqna-uc.a.run.app'
+      - '--set-secrets=GOOGLE_OAUTH_CLIENT_SECRET=JONJON_MCP_OAUTH_CLIENT_SECRET:latest'
 
 images:
   - 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/cloud-run/pendle-mcp-server:$SHORT_SHA'
