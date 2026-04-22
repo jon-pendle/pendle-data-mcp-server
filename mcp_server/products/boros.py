@@ -97,6 +97,22 @@ reporting unless the raw user-level breakdown is explicitly needed.**
 - If a table has `data_source`, ALWAYS filter `data_source = 'production'`.
 - Never mix production and staging in one result.
 
+### Incentive Channels
+
+Boros distributes Merkle campaign incentives in three buckets (see
+`user_market_metric_all_in_one_daily` / `user_eod_position_summary`):
+
+- `amm_lp_rewards_*` — rewards paid to AMM LP holders.
+- `lol_incentive_*` — "LOL" = maker incentives for providing limit-order liquidity
+  (`merkle_user_campaigns.program = 'provideLiquidity'`).
+- `mv_incentive_*` — "MV" = maker incentives for maker volume
+  (`merkle_user_campaigns.program = 'makerVolume'`, plus any legacy pre-2026-01-23
+  `maker_incentive` rows where `program` is NULL, which are bucketed into MV by business rule).
+
+`maker_incentive_*` = `lol_incentive_*` + `mv_incentive_*` and is retained for
+backward compatibility. Prefer the LOL / MV split when the question is about
+incentive channel attribution.
+
 ## Operational Knowledge (Boros Knowledge Base)
 
 For risk parameters, market maker terms, trading strategies, zone thresholds,
@@ -425,7 +441,12 @@ aggregation from `user_activity_all`), so values align with that table exactly.
 
 #### Incentives (flow → SUM)
 - `amm_lp_rewards_usd` / `amm_lp_rewards_token_amount`: daily AMM LP reward incentives
-- `maker_incentive_usd` / `maker_incentive_token_amount`: daily maker incentives
+- `lol_incentive_usd` / `lol_incentive_token_amount`: LOL sub-program of maker incentives
+  (merkle_user_campaigns.program = 'provideLiquidity')
+- `mv_incentive_usd` / `mv_incentive_token_amount`: MV sub-program of maker incentives
+  (program = 'makerVolume' OR legacy pre-2026-01-23 rows where program IS NULL)
+- `maker_incentive_usd` / `maker_incentive_token_amount`: total maker incentives = LOL + MV
+  (kept for backward compatibility)
 - `total_incentives_usd` / `total_incentives_token_amount`: daily total incentives (amm_lp + maker)
 
 ### Aggregation Rules
@@ -512,12 +533,18 @@ Built on top of `user_market_metric_all_in_one_daily` with additional:
 
 #### Incentives (USD — flow → SUM)
 - `daily_amm_lp_rewards_usd`, `cumulative_amm_lp_rewards_usd`
-- `daily_maker_incentive_usd`, `cumulative_maker_incentive_usd`
+- `daily_lol_incentive_usd`, `cumulative_lol_incentive_usd` — LOL sub-program
+  (merkle_user_campaigns.program = 'provideLiquidity')
+- `daily_mv_incentive_usd`, `cumulative_mv_incentive_usd` — MV sub-program
+  (program = 'makerVolume' OR legacy pre-2026-01-23 rows where program IS NULL)
+- `daily_maker_incentive_usd`, `cumulative_maker_incentive_usd` — total maker = LOL + MV (backward compat)
 - `daily_total_incentives_usd`, `cumulative_total_incentives_usd`
 
 #### Incentives (token amount — flow → SUM)
 - `daily_amm_lp_rewards_token_amount`, `cumulative_amm_lp_rewards_token_amount`
-- `daily_maker_incentive_token_amount`, `cumulative_maker_incentive_token_amount`
+- `daily_lol_incentive_token_amount`, `cumulative_lol_incentive_token_amount`
+- `daily_mv_incentive_token_amount`, `cumulative_mv_incentive_token_amount`
+- `daily_maker_incentive_token_amount`, `cumulative_maker_incentive_token_amount` — = LOL + MV (backward compat)
 - `daily_total_incentives_token_amount`, `cumulative_total_incentives_token_amount`
 
 Token amounts are raw ERC20 units (already divided by 1e18). Use for tracking PENDLE token distributions independent of price.
@@ -831,8 +858,11 @@ SPEC = ProductSpec(
                 "User-market daily metrics. Grain: (data_source, user_address, market_id, dt).\n"
                 "Key metrics: position (notional_size), volume (daily_notional_vol), "
                 "fees (swap_fees, settlement_fees), PnL (trading + settlement, daily + cumulative), "
+                "incentives (amm_lp_rewards + maker_incentive, with maker split into "
+                "LOL (provideLiquidity) and MV (makerVolume + legacy/NULL)), "
                 "user_classification (AMM/ExMM/inMM/carry).\n"
-                "→ Use for: top traders, per-user PnL, user activity analysis, fee breakdown."
+                "→ Use for: top traders, per-user PnL, user activity analysis, fee breakdown, "
+                "LOL vs MV incentive attribution."
             ),
             catalog=_USER_MARKET_METRICS,
         ),
@@ -856,8 +886,10 @@ SPEC = ProductSpec(
                 "User EOD position summary with total PnL and incentives. "
                 "Grain: (data_source, user_address, market_id, token_symbol, dt).\n"
                 "Key metrics: total_pnl (trading+settlement+unrealized), position_value, "
-                "cumulative volumes, incentives (AMM LP rewards + maker incentives).\n"
-                "→ Use for: user total PnL, incentive tracking, position value analysis."
+                "cumulative volumes, incentives (AMM LP rewards + maker incentives split into "
+                "LOL (provideLiquidity) and MV (makerVolume + legacy/NULL), daily + cumulative).\n"
+                "→ Use for: user total PnL, incentive tracking (including LOL vs MV), "
+                "position value analysis."
             ),
             catalog=_USER_EOD_POSITION,
         ),
