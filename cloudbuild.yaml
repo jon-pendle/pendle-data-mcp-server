@@ -12,7 +12,7 @@ steps:
       - |
         set -e
         mkdir -p /root/.ssh
-        printf '%s' "$$DEPLOY_KEY" > /root/.ssh/id_ed25519
+        printf '%s\n' "$$DEPLOY_KEY" > /root/.ssh/id_ed25519
         chmod 600 /root/.ssh/id_ed25519
         ssh-keyscan -t ed25519 github.com >> /root/.ssh/known_hosts 2>/dev/null
         git submodule update --init --recursive
