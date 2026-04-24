@@ -1,5 +1,0 @@
-# Runtime dependencies for KB tooling.
-#
-# Python ≥ 3.11  → tomllib is stdlib, nothing extra needed.
-# Python < 3.11  → tomli is the drop-in backport.
-tomli>=2.0.0 ; python_version < "3.11"

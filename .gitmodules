@@ -1,0 +1,3 @@
+[submodule "boros-kb"]
+	path = boros-kb
+	url = git@github.com:pendle-finance/boros-knowledge-base.git
