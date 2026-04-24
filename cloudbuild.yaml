@@ -1,10 +1,21 @@
 steps:
   # 1. Initialize the boros-kb submodule into the build context.
-  #    Requires the Cloud Build trigger's GitHub App install to have read access
-  #    to both pendle-data-mcp-server and pendle-finance/boros-knowledge-base.
+  #    Auth: a read-only GitHub deploy key registered on
+  #    pendle-finance/boros-knowledge-base; private half stored as
+  #    BOROS_KB_DEPLOY_KEY in Secret Manager and injected below.
   - name: 'gcr.io/cloud-builders/git'
     id: init-submodules
-    args: ['submodule', 'update', '--init', '--recursive']
+    entrypoint: bash
+    secretEnv: ['DEPLOY_KEY']
+    args:
+      - -c
+      - |
+        set -e
+        mkdir -p /root/.ssh
+        printf '%s' "$$DEPLOY_KEY" > /root/.ssh/id_ed25519
+        chmod 600 /root/.ssh/id_ed25519
+        ssh-keyscan -t ed25519 github.com >> /root/.ssh/known_hosts 2>/dev/null
+        git submodule update --init --recursive
 
   # 2. Build the container image tagged with the commit SHA.
   - name: 'gcr.io/cloud-builders/docker'
@@ -43,8 +54,15 @@ steps:
       - '--set-env-vars=GOOGLE_OAUTH_CLIENT_ID=756482294543-flqkea2lpkugufl15rh7tjne6mjcbif7.apps.googleusercontent.com,MCP_SERVER_BASE_URL=https://p-data-mcp-server-7vz6iynqna-as.a.run.app,QA_SERVICE_URL=https://llm-service-qa-7vz6iynqna-uc.a.run.app'
       - '--set-secrets=GOOGLE_OAUTH_CLIENT_SECRET=JONJON_MCP_OAUTH_CLIENT_SECRET:latest'
 
+availableSecrets:
+  secretManager:
+    - versionName: projects/$PROJECT_ID/secrets/BOROS_KB_DEPLOY_KEY/versions/latest
+      env: DEPLOY_KEY
+
 images:
   - 'asia-southeast1-docker.pkg.dev/$PROJECT_ID/cloud-run/pendle-mcp-server:$SHORT_SHA'
 
 options:
   dynamic_substitutions: true
+  # Custom service account builds must specify a log destination.
+  logging: CLOUD_LOGGING_ONLY
