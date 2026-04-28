@@ -15,7 +15,35 @@ docker build -t pendle-mcp-server .
 docker run -p 8080:8080 pendle-mcp-server
 ```
 
-Deployed via Cloud Build → Cloud Run (see `cloudbuild.yaml`).
+## Deployment
+
+**Push-to-main is the deploy.** A GitHub-side Cloud Build trigger watches the
+`main` branch — every merge fires a build via `cloudbuild.yaml` that:
+
+1. Initializes the `boros-kb/` submodule (deploy key in Secret Manager).
+2. Builds the Docker image and tags it with the commit `$SHORT_SHA`.
+3. Pushes to Artifact Registry
+   (`asia-southeast1-docker.pkg.dev/pendle-data/cloud-run/pendle-mcp-server`).
+4. Rolls out a new Cloud Run revision in `asia-southeast1`.
+
+So the deploy workflow is just:
+
+```bash
+git push origin main      # this is the deploy
+```
+
+**Do NOT** run `gcloud builds submit --config cloudbuild.yaml` manually as the
+deploy — it bypasses the trigger model, can fail on bucket permissions, and
+creates a `storageSource` build that doesn't carry the commit metadata.
+Manual `gcloud builds submit` is only appropriate for one-off ad-hoc rebuilds
+when the trigger is broken or for testing changes from a branch other than
+`main` that you don't want to land yet.
+
+Verifying a deploy: most ergonomic check is the Cloud Run service revision
+list in the GCP console (or `gcloud run services describe ...` if you have
+the role). The build trigger and the `gcloud builds list` views may be hidden
+behind IAM roles the everyday SA on dev VMs doesn't hold — silence isn't
+proof the build didn't run.
 
 ## Architecture
 
