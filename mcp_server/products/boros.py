@@ -97,7 +97,7 @@ reporting unless the raw user-level breakdown is explicitly needed.**
 - If a table has `data_source`, ALWAYS filter `data_source = 'production'`.
 - Never mix production and staging in one result.
 
-### Incentive Channels
+### Incentive Channels & MM compensation
 
 Boros distributes Merkle campaign incentives in four buckets (see
 `user_market_metric_all_in_one_daily` / `user_eod_position_summary`):
@@ -118,6 +118,15 @@ Boros distributes Merkle campaign incentives in four buckets (see
 `maker_incentive_*` = `lol_incentive_*` + `mv_incentive_*` and is retained for
 backward compatibility. Prefer the LOL / MV split when the question is about
 incentive channel attribution. `total_incentives_*` includes all four buckets.
+
+**Off-platform MM compensation** (separate from the Merkle system):
+- `external_mm_monthly_fee_usd` — monthly fee Boros pays to external MMs.
+  Manually computed and entered in a Google Sheet (`BOROS_MM_Monthly_Fee` →
+  `boros_analytics.external_mm_monthly_fee`); synced into the daily tables
+  on the row's `reconciliation_end` day per (user, market). Positive sign =
+  income to the MM. **Deliberately NOT included in `total_incentives_*`** —
+  that aggregate stays Merkle-only. For total MM compensation, sum manually:
+  `total_incentives_usd + external_mm_monthly_fee_usd`.
 
 ## Operational Knowledge (Boros Knowledge Base)
 
@@ -459,6 +468,11 @@ aggregation from `user_activity_all`), so values align with that table exactly.
   "what did referrer X earn" — do NOT compute as `0.20 × swap_fees`** (the derived formula
   understates by 50%+ vs actuals).
 - `total_incentives_usd` / `total_incentives_token_amount`: daily total = amm_lp + maker + referral
+- `external_mm_monthly_fee_usd`: off-platform monthly fee Boros pays to external MMs
+  (sourced from `boros_analytics.external_mm_monthly_fee` Google Sheet). Lump on the
+  `reconciliation_end` day per (user, market); zero on non-payment days. **Not** included
+  in `total_incentives_*` (which is Merkle-only). Sum with `total_incentives_usd`
+  for total MM compensation.
 
 ### Aggregation Rules
 - Volume/fees: SUM across days, SUM across users.
@@ -553,6 +567,10 @@ Built on top of `user_market_metric_all_in_one_daily` with additional:
   commission. Lump on epoch_end days (zero otherwise); cumulative is the running total.
   **Source of truth for "what referrer X earned"** — don't derive from `0.20 × swap_fees`.
 - `daily_total_incentives_usd`, `cumulative_total_incentives_usd` — sum across all four buckets
+- `daily_external_mm_monthly_fee_usd`, `cumulative_external_mm_monthly_fee_usd` —
+  off-platform monthly fee Boros pays to ExMMs. Lump on reconciliation_end day; cumulative
+  is the running total. **Not** included in `total_incentives_*` (Merkle-only). For
+  total MM compensation: `cumulative_total_incentives_usd + cumulative_external_mm_monthly_fee_usd`.
 
 #### Incentives (token amount — flow → SUM)
 - `daily_amm_lp_rewards_token_amount`, `cumulative_amm_lp_rewards_token_amount`
