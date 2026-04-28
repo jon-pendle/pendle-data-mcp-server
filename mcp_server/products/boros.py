@@ -99,7 +99,7 @@ reporting unless the raw user-level breakdown is explicitly needed.**
 
 ### Incentive Channels
 
-Boros distributes Merkle campaign incentives in three buckets (see
+Boros distributes Merkle campaign incentives in four buckets (see
 `user_market_metric_all_in_one_daily` / `user_eod_position_summary`):
 
 - `amm_lp_rewards_*` — rewards paid to AMM LP holders.
@@ -108,10 +108,16 @@ Boros distributes Merkle campaign incentives in three buckets (see
 - `mv_incentive_*` — "MV" = maker incentives for maker volume
   (`merkle_user_campaigns.program = 'makerVolume'`, plus any legacy pre-2026-01-23
   `maker_incentive` rows where `program` is NULL, which are bucketed into MV by business rule).
+- `referral_incentive_*` — actual paid referral commissions (the 20% share of referee
+  fees that the backend computes and entitles to referrers via Merkle batches). Attributed
+  to the **epoch_end day** — one lump per epoch per user-market-token, zeros on other days.
+  Use this column for "how much commission did referrer X actually receive" — do **NOT**
+  derive it as `0.20 × referee.swap_fees`; that approximation has been shown to diverge
+  from actuals by 50%+.
 
 `maker_incentive_*` = `lol_incentive_*` + `mv_incentive_*` and is retained for
 backward compatibility. Prefer the LOL / MV split when the question is about
-incentive channel attribution.
+incentive channel attribution. `total_incentives_*` includes all four buckets.
 
 ## Operational Knowledge (Boros Knowledge Base)
 
@@ -447,7 +453,12 @@ aggregation from `user_activity_all`), so values align with that table exactly.
   (program = 'makerVolume' OR legacy pre-2026-01-23 rows where program IS NULL)
 - `maker_incentive_usd` / `maker_incentive_token_amount`: total maker incentives = LOL + MV
   (kept for backward compatibility)
-- `total_incentives_usd` / `total_incentives_token_amount`: daily total incentives (amm_lp + maker)
+- `referral_incentive_usd` / `referral_incentive_token_amount`: actual referral commission
+  paid to a referrer (merkle_campaign='referral'), attributed on the epoch_end day. One
+  lump per epoch per user-market-token; zero on non-epoch days. **Use this for
+  "what did referrer X earn" — do NOT compute as `0.20 × swap_fees`** (the derived formula
+  understates by 50%+ vs actuals).
+- `total_incentives_usd` / `total_incentives_token_amount`: daily total = amm_lp + maker + referral
 
 ### Aggregation Rules
 - Volume/fees: SUM across days, SUM across users.
@@ -538,16 +549,22 @@ Built on top of `user_market_metric_all_in_one_daily` with additional:
 - `daily_mv_incentive_usd`, `cumulative_mv_incentive_usd` — MV sub-program
   (program = 'makerVolume' OR legacy pre-2026-01-23 rows where program IS NULL)
 - `daily_maker_incentive_usd`, `cumulative_maker_incentive_usd` — total maker = LOL + MV (backward compat)
-- `daily_total_incentives_usd`, `cumulative_total_incentives_usd`
+- `daily_referral_incentive_usd`, `cumulative_referral_incentive_usd` — paid referral
+  commission. Lump on epoch_end days (zero otherwise); cumulative is the running total.
+  **Source of truth for "what referrer X earned"** — don't derive from `0.20 × swap_fees`.
+- `daily_total_incentives_usd`, `cumulative_total_incentives_usd` — sum across all four buckets
 
 #### Incentives (token amount — flow → SUM)
 - `daily_amm_lp_rewards_token_amount`, `cumulative_amm_lp_rewards_token_amount`
 - `daily_lol_incentive_token_amount`, `cumulative_lol_incentive_token_amount`
 - `daily_mv_incentive_token_amount`, `cumulative_mv_incentive_token_amount`
 - `daily_maker_incentive_token_amount`, `cumulative_maker_incentive_token_amount` — = LOL + MV (backward compat)
+- `daily_referral_incentive_token_amount`, `cumulative_referral_incentive_token_amount`
 - `daily_total_incentives_token_amount`, `cumulative_total_incentives_token_amount`
 
-Token amounts are raw ERC20 units (already divided by 1e18). Use for tracking PENDLE token distributions independent of price.
+Token amounts are denominated in the underlying market token (PENDLE for maker_incentive;
+WBTC / WETH / USD₮0 / etc. for referral and amm_lp_rewards depending on the market).
+USD conversion uses per-token decimals from market_meta + hourly price_feeds at payout time.
 
 ### SQL Example
 ```sql
