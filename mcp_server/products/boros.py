@@ -699,6 +699,78 @@ GROUP BY week ORDER BY week
 ```
 """
 
+_LIMIT_ORDER_EVENTS = """\
+## `pendle-data.boros_analytics.limit_order_events`
+
+Per-event log of every limit-order action on Boros (placement, cancellation, fill, partial fill).
+Built from on-chain events; one row per (order_id, event_name) state transition.
+**Partition: DATE(event_date) — always filter on event_date.** Requires `data_source = 'production'`.
+
+Use this to enumerate all limit-order submitters per market, study maker behaviour
+(bid/ask asymmetry, single-market vs multi-market), order-size distribution, fill ratio,
+and quote/cancel churn. For pre-aggregated daily fee/volume by user, prefer
+`user_market_metric_all_in_one_daily`; this raw event log is for finer-grained analysis
+including unfilled / cancelled orders that don't show up in the aggregates.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| data_source | STRING | 'production' or 'staging' (always filter to production) |
+| event_date | DATETIME | Block timestamp of the event (UTC) |
+| maker | STRING | Wallet address that placed the order. NULL is not expected. |
+| tx_hash | STRING | On-chain transaction hash |
+| event_index | FLOAT64 | Per-tx event ordinal (combined with order_id forms unique key) |
+| market_id | INTEGER | Market id (JOIN to `market_meta.id`) |
+| market_name | STRING | Human-readable market name (denormalized for convenience) |
+| event_name | STRING | One of: `LimitOrderPlaced`, `LimitOrderCancelled`, `LimitOrderFilled`, `LimitOrderPartiallyFilled` |
+| order_id | STRING | Order identifier (unique within a market across its lifecycle) |
+| side | INTEGER | 0 or 1 — order side (long/short YU). Same convention as orderbook tables. |
+| fixed_apr | BIGNUMERIC | Fixed APR the order is placed at (the "execution price" for a Boros LO) |
+| order_index | INTEGER | Position within the maker's batch placement |
+| order_size | BIGNUMERIC | Original order size (YU notional, decimals already applied) |
+| filled_size | BIGNUMERIC | Filled portion. NULL on `LimitOrderPlaced` / `LimitOrderCancelled`. Set on `LimitOrderFilled` and `LimitOrderPartiallyFilled`. |
+
+### Aggregation rules
+- For "users who submitted a limit order" → `event_name = 'LimitOrderPlaced'`, GROUP BY `maker`.
+- For "active makers (orders that actually executed)" → `event_name IN ('LimitOrderFilled', 'LimitOrderPartiallyFilled')`.
+- For "fill ratio per maker" → join placed-rows to filled/partially-filled rows by `(data_source, market_id, order_id)`.
+- Volume / OI conventions of the broader Boros catalog (÷2 for two-sided market metrics) do NOT apply here — each row is one user-side event.
+
+### SQL Example 1 — distinct LO submitters per market in last 7 days, with bid/ask split
+```sql
+SELECT market_id, market_name, side,
+       COUNT(DISTINCT maker) AS submitters,
+       COUNT(DISTINCT order_id) AS orders_placed
+FROM `pendle-data.boros_analytics.limit_order_events`
+WHERE data_source = 'production'
+  AND event_name = 'LimitOrderPlaced'
+  AND event_date >= DATETIME_SUB(CURRENT_DATETIME(), INTERVAL 7 DAY)
+GROUP BY market_id, market_name, side
+ORDER BY market_id, side
+```
+
+### SQL Example 2 — per-maker behaviour profile (single vs multi-market, bid/ask balance, order size)
+```sql
+WITH placed AS (
+  SELECT maker, market_id, side, order_size
+  FROM `pendle-data.boros_analytics.limit_order_events`
+  WHERE data_source = 'production'
+    AND event_name = 'LimitOrderPlaced'
+    AND event_date >= DATETIME_SUB(CURRENT_DATETIME(), INTERVAL 7 DAY)
+)
+SELECT maker,
+       COUNT(DISTINCT market_id)                        AS markets_active,
+       COUNT(*)                                          AS orders_placed,
+       COUNTIF(side = 0)                                 AS bid_orders,
+       COUNTIF(side = 1)                                 AS ask_orders,
+       APPROX_QUANTILES(CAST(order_size AS FLOAT64), 4)  AS order_size_quartiles
+FROM placed
+GROUP BY maker
+HAVING orders_placed >= 5
+ORDER BY orders_placed DESC
+LIMIT 100
+```
+"""
+
 _BOROS_META_FIELDS = {
     "market_id": "id AS market_id",
     "market_name": "name AS market_name",
@@ -950,6 +1022,21 @@ SPEC = ProductSpec(
             ),
             catalog=_USER_AAARR_METRICS,
         ),
+        # ── Limit order event log ──────────────────────────────────────
+        TableSpec(
+            "pendle-data.boros_analytics.limit_order_events",
+            partition_col="event_date",
+            require_production_source=True,
+            description=(
+                "Per-event log of every limit-order action (placed/cancelled/filled/partially_filled). "
+                "Grain: one row per (order_id, event_name) state transition.\n"
+                "Key columns: maker (wallet), market_id, side, fixed_apr, order_size, filled_size, event_name.\n"
+                "→ Use for: enumerating all LO submitters (filled or unfilled), maker behaviour analysis "
+                "(bid/ask asymmetry, single-market vs multi-market), order-size distribution, fill ratio, "
+                "quote/cancel churn. For aggregated per-user daily fees/volume use user_market_metric_all_in_one_daily instead."
+            ),
+            catalog=_LIMIT_ORDER_EVENTS,
+        ),
         # ── Add new Boros tables here ──────────────────────────────────
     ),
     context=_CONTEXT,
@@ -966,7 +1053,7 @@ SPEC = ProductSpec(
         "Available tables: market_metrics_all_in_one_daily, market_meta, "
         "orderbook_snapshot_hourly, user_market_metric_all_in_one_daily, "
         "user_margin_balance_daily, user_eod_position_summary, "
-        "price_feeds, user_aaarr_metrics."
+        "price_feeds, user_aaarr_metrics, limit_order_events."
     ),
     register_extra_tools=_register_boros_tools,
 )
