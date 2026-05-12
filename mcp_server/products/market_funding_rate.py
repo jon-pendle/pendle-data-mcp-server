@@ -1,11 +1,13 @@
 """
 Market Funding Rate product specification.
 
-Covers cross-exchange funding rate data across three tables:
-- coinglass.market_funding_rate: high-frequency raw rates (Dataform-managed)
-- funding_rate_pairs.pair_timeseries: 90D history with OI, 8h-equivalent FR
+Covers cross-instrument "premium over spot" data:
+- coinglass.market_funding_rate: high-frequency raw perp funding rates (Dataform-managed)
+- funding_rate_pairs.pair_timeseries: 90D history with OI, 8h-equivalent perp FR
 - funding_rate_pairs.funding_rate_pairs_analysis: pre-computed OI-weighted
   cross-pair differentials (7d / 30d / 90d windows)
+- boros_analytics.futures_basis_hourly: TradFi dated-futures basis (CME + Deribit),
+  i.e. (futures_price - spot_price)/spot_price annualized as premium_apr
 """
 
 from . import ProductSpec, TableSpec
@@ -16,34 +18,49 @@ _CONTEXT = """\
 
 ## Overview
 
-Three tables cover market-wide perpetual funding rates across exchanges.
-They are complementary but NOT directly joinable — they use different key
-formats and different `funding_rate` normalizations.
+This product covers two related instrument families, both expressing "premium over spot":
 
-| Table (short name) | Purpose | FR unit | Key format |
-|---|---|---|---|
-| `market_funding_rate` | Current/recent rates, all tracked pairs | per-settlement-period | `exchange` + `trading_pair_symbol` |
-| `pair_timeseries` | 90D history snapshots + OI per pair | 8h-equivalent | `pair_key` = `exchange:symbol` |
-| `funding_rate_pairs_analysis` | Pre-computed snapshots of OI-weighted avg + cross-pair diff | 8h-equivalent | `exchange_a/b` + `symbol_a/b` |
+**(A) Perpetual funding rates** — three tables across crypto perp exchanges
+(Coinglass + Hyperliquid pairs). Complementary but NOT directly joinable:
+different key formats and different `funding_rate` unit conventions.
 
-## CRITICAL: funding_rate Normalization Differs Between Tables
+**(B) TradFi dated-futures basis** — one table covering CME + Deribit dated
+futures with the same instrument design as TradFi futures: a fixed expiry
+and a per-contract spot-vs-futures basis annualized as `premium_apr`.
 
-**`market_funding_rate`**:
+| Table (short name) | Family | Purpose | FR unit | Key format |
+|---|---|---|---|---|
+| `market_funding_rate` | A — perp | Current/recent rates, all tracked pairs | per-settlement-period | `exchange` + `trading_pair_symbol` |
+| `pair_timeseries` | A — perp | 90D history snapshots + OI per pair | 8h-equivalent | `pair_key` = `exchange:symbol` |
+| `funding_rate_pairs_analysis` | A — perp | Pre-computed snapshots of OI-weighted avg + cross-pair diff | 8h-equivalent | `exchange_a/b` + `symbol_a/b` |
+| `futures_basis_hourly` | B — dated | Per-contract futures-vs-spot premium across exchanges, by maturity | annualized APR (decimal) | `exchange` + `contract_symbol` |
+
+## CRITICAL: funding_rate / premium Normalization Differs Between Tables
+
+**`market_funding_rate`** (perp):
 - `funding_rate` = raw rate per settlement period (e.g., 0.0001 = 0.01% per 8h on Binance)
 - `normalized_funding_rate = funding_rate / funding_rate_interval` = per-hour rate
 - Use `normalized_funding_rate` for cross-exchange comparison in this table.
 
-**`pair_timeseries` and `funding_rate_pairs_analysis`**:
+**`pair_timeseries` and `funding_rate_pairs_analysis`** (perp):
 - `funding_rate` = **8-hour equivalent** (all sources normalized to Binance's 8h interval).
 - Annualized rate ≈ `funding_rate × 3 × 365` (3 settlements per day at 8h interval).
 
+**`futures_basis_hourly`** (dated):
+- `premium_apr` = **annualized basis as decimal** (e.g., 0.0584 = 5.84% APR).
+  Already annualized — no further × 365 or × 3 transformation. Compare
+  directly to `8h_equivalent × 3 × 365`.
+
 **Never mix `funding_rate` from `market_funding_rate` with `funding_rate` from
-`pair_timeseries` in the same calculation — they are in different units.**
+`pair_timeseries` in the same calculation.** Likewise: don't compare raw
+`funding_rate` (A-family, per-period) directly to `premium_apr` (B-family,
+already annualized) — annualize A first.
 
 ## Exchange Name Casing: Always Use LOWER() for Filtering
 
-Exchange names are not consistently cased across tables. **Always apply `LOWER()`
-when filtering by exchange name** to avoid silent mismatches.
+Exchange names are not consistently cased across tables (Coinglass tables use
+`'Binance'`, `'Bybit'`; `futures_basis_hourly` uses `'cme'`, `'deribit'`).
+**Always apply `LOWER()` when filtering by exchange name** to avoid silent mismatches.
 """
 
 
@@ -181,6 +198,104 @@ LIMIT 10
 """
 
 
+_FUTURES_BASIS_HOURLY = """\
+## `pendle-data.boros_analytics.futures_basis_hourly`
+
+TradFi dated-futures basis observations across exchanges. Lives in
+`boros_analytics` because of physical adjacency to Boros analytics, but the
+data itself is general crypto+commodity market data, not Boros-protocol data.
+
+- Partition: `ts` (TIMESTAMP) — always filter on `ts`.
+- Grain: `(exchange, contract_symbol, ts)`. Each contract has many rows over
+  its lifetime (one per snapshot); each snapshot has one row per active contract.
+- Source: `funding-data-api.futures_basis` Mongo collection (provider:
+  `cme-databento` for CME, `deribit-public` for Deribit).
+- Coverage: 2021-05-06 → today; ~373K rows total (size as of 2026-05-12).
+- Exchanges: `'cme'` + `'deribit'` (lowercase, no LOWER() needed but harmless).
+- Underlyings (5): BTC, ETH, SOL, XAG (silver), XAU (gold). Crypto-only
+  overlap CME ∩ Deribit is BTC + ETH; CME has the metals + SOL extras.
+
+### Granularity caveat
+
+Despite the `_hourly` suffix, the **actual cadence depends on the exchange**:
+- **CME**: one row per contract per day at 00:00 UTC (exchange-traded
+  futures only publish once per day per contract).
+- **Deribit**: genuinely hourly observations.
+
+So `COUNT(*)` per day per (exchange, contract_symbol) is typically 1 for CME
+and 24 for Deribit. Don't assume uniform spacing across exchanges.
+
+### Fields
+
+- `oid_str`: STRING — Mongo `_id` as hex (incremental key for the fetcher).
+- `exchange`: STRING — `'cme'` or `'deribit'`.
+- `base_symbol`: STRING — underlying asset (`'BTC'`, `'ETH'`, `'SOL'`, `'XAG'`, `'XAU'`).
+- `contract_symbol`: STRING — exchange-specific contract id
+  (e.g. `'BTCK26.CME'` = May 2026 BTC future on CME, `'BTC-29MAY26'` on Deribit).
+- `expiry_date`: DATE — contract expiry (00:00 UTC on this date).
+- `days_to_expiry`: FLOAT — fractional days from observation `ts` to expiry.
+- `ts`: TIMESTAMP — observation time (PARTITION COLUMN).
+- `granularity`: STRING — provider-reported (`'hourly'` for Deribit).
+- `futures_price`: FLOAT — futures contract price at `ts` (USD).
+- `spot_price`: FLOAT — spot reference at `ts` (USD). Equals `futures_price`
+  in rare degenerate rows (e.g. silver `SIK26.CMX` on a quiet day).
+- `premium_apr`: FLOAT — **annualized basis as decimal**.
+  `≈ ln(futures_price/spot_price) / (days_to_expiry/365)`.
+  Positive = contango (futures > spot), negative = backwardation.
+- `is_spot_proxy`: BOOL — true when spot is proxied (e.g. perp index price
+  used as spot fallback for an underlying without a direct spot market).
+- `provider`: STRING — data source (`'cme-databento'`, `'deribit-public'`).
+- `created_at` / `updated_at`: TIMESTAMP — fetcher metadata.
+
+### Use For
+- Latest basis term-structure for a single underlying (basis curve).
+- Cross-exchange basis comparison (CME vs Deribit on overlapping BTC/ETH).
+- Calendar spreads (long-tenor − short-tenor `premium_apr`).
+- Comparing dated-futures basis to perp funding rate as alternative carry yield.
+
+### Aggregation rules
+- Always filter on `ts` partition. For "latest", use
+  `DATE(ts) = DATE_SUB(CURRENT_DATE(), INTERVAL 1 DAY)` and pick the latest
+  `ts` per contract.
+- `premium_apr` is already annualized — do not multiply by 365 again.
+- To compare to perp funding rate (8h-equivalent), convert perp first:
+  `perp_apr ≈ pair_timeseries.funding_rate × 3 × 365`.
+
+### Example 1 — latest CME basis term-structure for BTC
+```sql
+WITH latest AS (
+  SELECT contract_symbol, MAX(ts) AS ts
+  FROM `pendle-data.boros_analytics.futures_basis_hourly`
+  WHERE DATE(ts) >= DATE_SUB(CURRENT_DATE(), INTERVAL 2 DAY)
+    AND exchange = 'cme' AND base_symbol = 'BTC'
+  GROUP BY contract_symbol
+)
+SELECT f.contract_symbol, f.expiry_date,
+       ROUND(f.days_to_expiry, 1)    AS days_to_exp,
+       ROUND(f.spot_price, 2)         AS spot,
+       ROUND(f.futures_price, 2)      AS future,
+       ROUND(f.premium_apr * 100, 3)  AS basis_apr_pct
+FROM `pendle-data.boros_analytics.futures_basis_hourly` f
+JOIN latest USING (contract_symbol, ts)
+WHERE DATE(f.ts) >= DATE_SUB(CURRENT_DATE(), INTERVAL 2 DAY)
+ORDER BY f.expiry_date
+```
+
+### Example 2 — CME vs Deribit basis for the closest-expiry BTC contract
+```sql
+SELECT exchange, contract_symbol, expiry_date,
+       ROUND(AVG(premium_apr * 100), 3) AS avg_basis_apr_pct,
+       MIN(ts) AS first_obs, MAX(ts) AS last_obs
+FROM `pendle-data.boros_analytics.futures_basis_hourly`
+WHERE DATE(ts) >= DATE_SUB(CURRENT_DATE(), INTERVAL 7 DAY)
+  AND base_symbol = 'BTC'
+  AND expiry_date > CURRENT_DATE()
+GROUP BY exchange, contract_symbol, expiry_date
+ORDER BY expiry_date, exchange
+```
+"""
+
+
 SPEC = ProductSpec(
     product_id="market_funding_rate",
     display_name="Market Funding Rate",
@@ -219,21 +334,43 @@ SPEC = ProductSpec(
             ),
             catalog=_PAIRS_ANALYSIS,
         ),
-        # ── Add new funding rate tables here ───────────────────────────
+        # ── TradFi dated-futures basis (CME + Deribit) ─────────────────
+        TableSpec(
+            "pendle-data.boros_analytics.futures_basis_hourly",
+            partition_col="ts",
+            description=(
+                "TradFi dated-futures basis (CME + Deribit). Grain: "
+                "(exchange, contract_symbol, ts). Coverage 2021-05-06→today, "
+                "~373K rows. 5 underlyings: BTC, ETH, SOL, XAG (silver), XAU (gold). "
+                "Key fields: exchange ('cme'/'deribit'), base_symbol, contract_symbol, "
+                "expiry_date, days_to_expiry, futures_price, spot_price, "
+                "premium_apr (annualized basis as decimal, e.g. 0.0584 = 5.84% APR).\n"
+                "Granularity caveat: CME = daily (00:00 UTC, one row/contract/day), "
+                "Deribit = genuinely hourly. Don't assume uniform spacing.\n"
+                "→ Use for: futures basis term-structure, calendar spreads, "
+                "cross-exchange basis comparison (CME vs Deribit), "
+                "alternative carry-yield analysis vs perp funding."
+            ),
+            catalog=_FUTURES_BASIS_HOURLY,
+        ),
+        # ── Add new funding rate / basis tables here ───────────────────
     ),
     context=_CONTEXT,
     tool_description=(
-        "Returns the Market Funding Rate catalog INDEX: normalization rules "
-        "(CRITICAL — funding_rate units differ between tables), exchange name "
-        "casing warnings, and table summaries.\n\n"
-        "CALL THIS FIRST before querying any funding rate table. "
+        "Returns the Market Funding Rate catalog INDEX: covers BOTH perp funding "
+        "rates (Coinglass + Hyperliquid) and TradFi dated-futures basis "
+        "(CME + Deribit via futures_basis_hourly). Includes normalization rules "
+        "(CRITICAL — per-period vs 8h-equivalent vs already-annualized APR differ "
+        "between tables), exchange name casing warnings, and table summaries.\n\n"
+        "CALL THIS FIRST before querying any rate/basis table. "
         "Then call get_market_funding_rate_table_detail(table_name) for full column definitions."
     ),
     table_detail_description=(
         "Full column definitions, aggregation rules, and SQL examples for a "
-        "Market Funding Rate table (cross-exchange perpetual funding rates). "
-        "NOT Pendle or Boros protocol data.\n\n"
-        "Available tables: market_funding_rate, pair_timeseries, funding_rate_pairs_analysis."
+        "Market Funding Rate table — covers cross-exchange perp funding rates "
+        "AND TradFi dated-futures basis. NOT Pendle or Boros protocol data.\n\n"
+        "Available tables: market_funding_rate, pair_timeseries, "
+        "funding_rate_pairs_analysis, futures_basis_hourly."
     ),
     register_extra_tools=None,
 )

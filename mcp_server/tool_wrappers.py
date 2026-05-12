@@ -407,16 +407,16 @@ def register_tools(mcp: FastMCP):
     _CHANGELOG = (
         "# MCP Server Changelog (last 10 updates)\n"
         "\n"
-        "1. 2026-05-04 — Add boros limit_order_events to catalog (per-event LO log: placed/cancelled/filled/partially_filled, with maker/side/fixed_apr/order_size)\n"
-        "2. 2026-04-28 — Sync pipeline: add Boros external_mm_monthly_fee_usd (off-platform MM fee) as a 5th compensation bucket alongside the 4 Merkle incentives in user_market_metric_all_in_one_daily / user_eod_position_summary; not in total_incentives_*\n"
-        "3. 2026-04-28 — Sync pipeline: add Boros referral_incentive_* (actual paid commissions) to user_market_metric_all_in_one_daily / user_eod_position_summary; fix per-token decimals USD conversion for non-18-dec tokens\n"
-        "4. 2026-04-21 — Sync pipeline: split Boros maker_incentive into LOL (provideLiquidity) and MV (makerVolume + legacy/NULL)\n"
-        "5. 2026-04-17 — Fix partition filter check for expression-valued partition_col (DATE(hour))\n"
-        "6. 2026-04-16 — Log BQ error message in tool_usage for run_sql failures\n"
-        "7. 2026-04-16 — Loosen partition filter check to accept wrapped partition column (DATE/CAST/EXTRACT/DATE_TRUNC)\n"
-        "8. 2026-04-16 — Accept comma-separated strings for list[str] fields params and backticked partition column\n"
-        "9. 2026-04-15 — Sync pipeline: add taker/maker USD volume splits to boros user_market_metric_all_in_one_daily\n"
-        "10. 2026-04-14 — Sync pipeline: add pendle_incomes_all_in_one_each_epoch table to pendle catalog\n"
+        "1. 2026-05-12 — Add boros_analytics.futures_basis_hourly to market_funding_rate catalog (CME + Deribit dated-futures basis, 5 underlyings BTC/ETH/SOL/XAG/XAU, ~373K rows since 2021-05-06; broaden product scope to perp FR + TradFi basis)\n"
+        "2. 2026-05-04 — Add boros limit_order_events to catalog (per-event LO log: placed/cancelled/filled/partially_filled, with maker/side/fixed_apr/order_size)\n"
+        "3. 2026-04-28 — Sync pipeline: add Boros external_mm_monthly_fee_usd (off-platform MM fee) as a 5th compensation bucket alongside the 4 Merkle incentives in user_market_metric_all_in_one_daily / user_eod_position_summary; not in total_incentives_*\n"
+        "4. 2026-04-28 — Sync pipeline: add Boros referral_incentive_* (actual paid commissions) to user_market_metric_all_in_one_daily / user_eod_position_summary; fix per-token decimals USD conversion for non-18-dec tokens\n"
+        "5. 2026-04-21 — Sync pipeline: split Boros maker_incentive into LOL (provideLiquidity) and MV (makerVolume + legacy/NULL)\n"
+        "6. 2026-04-17 — Fix partition filter check for expression-valued partition_col (DATE(hour))\n"
+        "7. 2026-04-16 — Log BQ error message in tool_usage for run_sql failures\n"
+        "8. 2026-04-16 — Loosen partition filter check to accept wrapped partition column (DATE/CAST/EXTRACT/DATE_TRUNC)\n"
+        "9. 2026-04-16 — Accept comma-separated strings for list[str] fields params and backticked partition column\n"
+        "10. 2026-04-15 — Sync pipeline: add taker/maker USD volume splits to boros user_market_metric_all_in_one_daily\n"
     )
 
     @mcp.tool(
